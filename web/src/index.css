@@ -1,0 +1,139 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Colour tokens (RGB triplets so Tailwind can apply alpha). Dark is the default. */
+:root,
+:root[data-theme="dark"] {
+  --bg: 12 13 16;
+  --panel: 19 20 25;
+  --raised: 27 29 36;
+  --line: 42 45 55;
+  --ink: 232 233 237;
+  --muted: 150 154 167;
+  --faint: 98 102 115;
+  --brand: 255 176 0;
+  --flame: 255 106 0;
+  --ok: 52 211 153;
+  --warn: 251 191 36;
+  --bad: 248 113 113;
+  --info: 96 165 250;
+  --violet: 167 139 250;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: 248 247 244;
+  --panel: 255 255 255;
+  --raised: 242 241 237;
+  --line: 224 222 215;
+  --ink: 24 24 27;
+  --muted: 92 94 104;
+  --faint: 150 150 158;
+  --brand: 214 140 0;
+  --flame: 230 85 0;
+  --ok: 5 150 105;
+  --warn: 180 120 0;
+  --bad: 220 38 38;
+  --info: 37 99 235;
+  --violet: 124 58 237;
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg font-sans text-ink antialiased;
+  font-feature-settings: "cv11", "ss01";
+}
+
+::selection {
+  background: rgb(var(--brand) / 0.3);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--line)) transparent;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn bg-brand text-black hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply btn text-muted hover:bg-raised hover:text-ink;
+  }
+  .btn-outline {
+    @apply btn border border-line text-ink hover:border-faint hover:bg-raised;
+  }
+  .btn-danger {
+    @apply btn border border-bad/40 text-bad hover:bg-bad/10;
+  }
+  .card {
+    @apply rounded-xl border border-line bg-panel shadow-card;
+  }
+  .input {
+    @apply w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm text-ink placeholder:text-faint
+      focus:border-brand/60 focus:outline-none focus:ring-2 focus:ring-brand/20;
+  }
+  .label {
+    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-faint;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium leading-none;
+  }
+}
+
+/* Markdown inside assistant messages */
+.md {
+  @apply prose prose-sm max-w-none dark:prose-invert;
+  --tw-prose-body: rgb(var(--ink));
+  --tw-prose-headings: rgb(var(--ink));
+  --tw-prose-links: rgb(var(--brand));
+  --tw-prose-bold: rgb(var(--ink));
+  --tw-prose-code: rgb(var(--ink));
+  --tw-prose-bullets: rgb(var(--faint));
+  --tw-prose-counters: rgb(var(--faint));
+  --tw-prose-hr: rgb(var(--line));
+  --tw-prose-quotes: rgb(var(--muted));
+  --tw-prose-quote-borders: rgb(var(--brand) / 0.5);
+  --tw-prose-th-borders: rgb(var(--line));
+  --tw-prose-td-borders: rgb(var(--line));
+  --tw-prose-invert-body: rgb(var(--ink));
+  --tw-prose-invert-headings: rgb(var(--ink));
+  --tw-prose-invert-links: rgb(var(--brand));
+  --tw-prose-invert-bold: rgb(var(--ink));
+  --tw-prose-invert-code: rgb(var(--ink));
+  --tw-prose-invert-bullets: rgb(var(--faint));
+  --tw-prose-invert-hr: rgb(var(--line));
+  --tw-prose-invert-quotes: rgb(var(--muted));
+  --tw-prose-invert-th-borders: rgb(var(--line));
+  --tw-prose-invert-td-borders: rgb(var(--line));
+}
+.md :where(p, ul, ol) {
+  @apply my-2;
+}
+.md :where(code):not(pre code) {
+  @apply rounded bg-raised px-1 py-0.5 font-mono text-[0.85em] font-normal;
+}
+.md :where(code):not(pre code)::before,
+.md :where(code):not(pre code)::after {
+  content: none;
+}
+.md pre {
+  @apply my-3 rounded-lg border border-line bg-bg p-3 font-mono text-[12.5px] leading-relaxed text-ink;
+}
+.md table {
+  @apply my-3 text-[13px];
+}

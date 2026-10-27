@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+build/
+dist/
+
+# Frontend
+web/node_modules/
+web/*.tsbuildinfo
+
+# Local state / agent output
+.kestrel/
+*.log

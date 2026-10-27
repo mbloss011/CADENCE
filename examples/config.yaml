@@ -1,0 +1,95 @@
+# Copy to ~/.kestrel/config.yaml (global) or <workspace>/.kestrel/config.yaml (per project).
+# Precedence: defaults < global < workspace < environment variables.
+
+big:                          # plans, writes code, reflects
+  name: ornith-1.5-9b
+  base_url: http://localhost:1234/v1
+  context_window: 32768
+small:                        # compaction, distillation, lesson consolidation
+  name: liquid/lfm2-1.2b
+  base_url: http://localhost:1234/v1
+  context_window: 32768
+
+compact_trigger: 0.70         # start compacting at 70% of the big model's window
+compact_target: 0.40          # compact down to 40%
+keep_recent_messages: 8
+reflection_cycles: 6          # idea/improvement cycles per day in daemon mode
+max_reflections_per_goal: 3
+auto_approve_ideas: false     # autonomous ideas wait for `kestrel goals approve <id>`
+max_parallel_goals: 2
+allow_shell: true
+
+# Extra Agent Skills directories (defaults: ~/.kestrel/skills, .kestrel/skills, .agents/skills)
+# skill_dirs: [~/my-skills]
+
+# MCP servers (stdio). Tools appear as mcp__<server>__<tool>. Browser use and computer use
+# are provided by MCP servers such as Playwright MCP — add them here.
+mcp_servers:
+  filesystem:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    enabled: false
+  browser:
+    command: npx
+    args: ["-y", "@playwright/mcp@latest"]
+    enabled: false
+
+# ── Long-term memory ───────────────────────────────────────────────────────────────────────
+# Hybrid retrieval: vector similarity (embedding model) + keyword overlap + recency.
+# local  = vectors in ~/.kestrel/state/memory.vectors.jsonl (no services)
+# qdrant = Qdrant server; start it with: docker compose -f deploy/docker-compose.yml up -d
+# keyword = no embeddings (previous behaviour). If the embedder is down, search falls back to keywords.
+memory:
+  backend: local
+  embed_model: text-embedding-nomic-embed-text-v1.5
+  # embed_url: http://localhost:1234/v1      # default: the big model's endpoint
+  # qdrant_url: http://localhost:6333
+  min_similarity: 0.55                       # cosine floor; tuned for nomic-embed
+  semantic_weight: 0.75
+
+# ── Image understanding ────────────────────────────────────────────────────────────────────
+# `view_image` tool, `/image` in chat, `kestrel run --image`, photos sent over Telegram/WhatsApp.
+# Defaults to the big model (ornith-1.5-9b is a VLM). Point at another VLM if yours is text-only:
+# vision: {name: qwen/qwen3.5-9b}
+
+# ── Sandbox for `bash` and goal verify commands ─────────────────────────────────────────────
+# bwrap  = bubblewrap: read-only host, writable workspace, private /tmp, $HOME hidden
+# docker = throwaway container with the workspace mounted at the same path
+sandbox:
+  mode: none            # none | bwrap | docker
+  network: true
+  hide_home: true       # bwrap only; add tool dirs you need with ro_binds
+  # ro_binds: [~/.local/bin, ~/.cargo]
+  # rw_binds: [~/.cache/pip]
+  # image: python:3.12-slim
+
+# ── Hooks ──────────────────────────────────────────────────────────────────────────────────
+# Events: session_start, user_prompt, pre_tool, post_tool, stop, goal_done. JSON payload on stdin.
+# exit 0 → stdout becomes context · exit 2 → block (stderr is the reason) · other → ignored.
+# hooks:
+#   - event: pre_tool
+#     matcher: bash                 # glob on tool name
+#     command: ./scripts/guard.sh
+#   - event: goal_done
+#     command: notify-send "kestrel" "goal finished"
+
+# ── Plugins ────────────────────────────────────────────────────────────────────────────────
+# Python files with register(api) in ~/.kestrel/plugins or <workspace>/.kestrel/plugins
+# (see examples/plugins/guard.py), or packages with a `kestrel.plugins` entry point.
+# plugins:
+#   disabled: [some_plugin]
+
+# ── Messaging channels (run by `kestrel daemon`) ────────────────────────────────────────────
+# Secrets as $ENV_VAR references. An allowlist is mandatory: the agent can run commands here.
+# channels:
+#   telegram:
+#     token: $TELEGRAM_BOT_TOKEN
+#     allowed_chats: [123456789]      # message the bot once; it replies with your chat id
+#     notify: true                    # push goal results
+#   whatsapp:                         # Meta WhatsApp Cloud API; needs a public HTTPS tunnel
+#     access_token: $WHATSAPP_TOKEN
+#     phone_number_id: "1234567890"
+#     app_secret: $WHATSAPP_APP_SECRET
+#     verify_token: $WHATSAPP_VERIFY_TOKEN
+#     allowed_numbers: ["15551234567"]
+#     port: 8790                      # webhook: http://127.0.0.1:8790/whatsapp

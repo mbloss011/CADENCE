@@ -64,6 +64,7 @@ class Agent:
         depth: int = 0,
         extra_instructions: str = "",
         hooks: Hooks | None = None,
+        project: str = "",
     ):
         self.cfg = cfg
         self.router = router
@@ -73,6 +74,7 @@ class Agent:
         self.depth = depth
         self.extra_instructions = extra_instructions
         self.hooks = hooks or Hooks(workspace=cfg.workspace)
+        self.project = project
         self._started = False
         self.session_id = uuid.uuid4().hex[:10]
         self.scratchpad = Scratchpad(cfg.state_dir / "scratch" / f"{self.session_id}.json")
@@ -104,7 +106,8 @@ class Agent:
         path = self.cfg.state_dir / "sessions" / f"{self.session_id}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            json.dumps({"summary": self.ctx.summary, "messages": self.ctx.messages, "todos": self.todos}, ensure_ascii=False),
+            json.dumps({"summary": self.ctx.summary, "messages": self.ctx.messages, "todos": self.todos,
+                        "project": self.project, "agent": self.name}, ensure_ascii=False),
             encoding="utf-8",
         )
         return path
@@ -116,6 +119,7 @@ class Agent:
         self.ctx.summary = data.get("summary", "")
         self.ctx.messages = data.get("messages", [])
         self.todos = data.get("todos", [])
+        self.project = data.get("project", self.project)
 
     # ---------------------------------------------------------- system prompt
     def system_prompt(self) -> str:
@@ -129,6 +133,16 @@ class Agent:
                 parts.append(f"## {label}\n{truncate(path.read_text(encoding='utf-8', errors='ignore'), 6000)}")
         if self.extra_instructions:
             parts.append(self.extra_instructions)
+        surfaces = []
+        if self.registry.get("canvas_write"):
+            surfaces.append("- Canvas: put documents the user will read, review or edit (plans, reports, specs, drafts, "
+                            "HTML mockups) on the canvas with `canvas_write` and keep chat replies short. "
+                            "`canvas_read` before revising: the user may have edited it.")
+        if self.registry.get("browser_open"):
+            surfaces.append("- Browser: `browser_*` tools drive a real browser the user watches and can use too. "
+                            "If a page needs a login or captcha, ask the user to do it in the browser panel, then `browser_snapshot`.")
+        if surfaces:
+            parts.append("## Shared with the user\n" + "\n".join(surfaces))
         index = self.skills.index()
         if index:
             parts.append("## Available skills (load with `load_skill`)\n" + index)
@@ -380,8 +394,9 @@ class Agent:
             if not task:
                 return "ERROR: 'task' required"
             sub = Agent(self.cfg, self.router, self.registry, self.skills, self.memory,
-                        name=f"{self.name}/sub", depth=self.depth + 1, hooks=self.hooks,
-                        extra_instructions="You are a focused subagent. Complete the task and return a compact report.")
+                        name=f"{self.name}/sub", depth=self.depth + 1, hooks=self.hooks, project=self.project,
+                        extra_instructions=(self.extra_instructions + "\n\n" if self.extra_instructions else "")
+                        + "You are a focused subagent. Complete the task and return a compact report.")
             return truncate(await sub.run_to_completion(task), 6000)
 
         reg.register(Tool("load_skill", "Load the full instructions of a named skill.",

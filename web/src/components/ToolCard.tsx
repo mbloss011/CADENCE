@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import {
-  Bot, Brain, ChevronRight, FilePen, FilePlus2, FileText, FolderTree, Image, ListChecks, Plug, Search,
+  Bot, Brain, ChevronRight, FilePen, FilePlus2, FileText, FolderTree, Globe, Image, ListChecks, NotebookPen, Plug, Search,
   Sparkles, SquareTerminal, StickyNote, Wrench, type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -10,6 +10,9 @@ const ICONS: Record<string, LucideIcon> = {
   read_file: FileText, write_file: FilePlus2, edit_file: FilePen, list_files: FolderTree, grep: Search,
   bash: SquareTerminal, view_image: Image, memory_add: Brain, memory_search: Brain, todo_write: ListChecks,
   spawn_subagent: Bot, load_skill: Sparkles, scratchpad_set: StickyNote,
+  canvas_write: NotebookPen, canvas_edit: NotebookPen, canvas_read: NotebookPen, canvas_list: NotebookPen, canvas_export: NotebookPen,
+  browser_open: Globe, browser_snapshot: Globe, browser_click: Globe, browser_type: Globe, browser_scroll: Globe,
+  browser_back: Globe, browser_key: Globe, browser_look: Globe,
 };
 
 function parse(args: string): Record<string, unknown> {
@@ -35,6 +38,12 @@ function headline(name: string, a: Record<string, unknown>): string {
     case "load_skill": return s("name");
     case "scratchpad_set": return s("key");
     case "todo_write": return `${Array.isArray(a.todos) ? a.todos.length : 0} tasks`;
+    case "canvas_write": return s("title") || `revise ${s("id")}`;
+    case "canvas_edit": case "canvas_read": return s("id");
+    case "browser_open": return s("url");
+    case "browser_click": return `element [${a.element}]`;
+    case "browser_type": return `[${a.element}] ← ${s("text")}`;
+    case "browser_look": return s("question") || "look at the page";
     default: {
       const first = Object.values(a).find((v) => typeof v === "string") as string | undefined;
       return first ?? "";

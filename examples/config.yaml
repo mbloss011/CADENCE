@@ -64,13 +64,13 @@ sandbox:
   # image: python:3.12-slim
 
 # ── Hooks ──────────────────────────────────────────────────────────────────────────────────
-# Events: session_start, user_prompt, pre_tool, post_tool, stop, goal_done. JSON payload on stdin.
+# Events: session_start, user_prompt, pre_tool, post_tool, stop, task_done, goal_achieved. JSON payload on stdin.
 # exit 0 → stdout becomes context · exit 2 → block (stderr is the reason) · other → ignored.
 # hooks:
 #   - event: pre_tool
 #     matcher: bash                 # glob on tool name
 #     command: ./scripts/guard.sh
-#   - event: goal_done
+#   - event: task_done
 #     command: notify-send "kestrel" "goal finished"
 
 # ── Plugins ────────────────────────────────────────────────────────────────────────────────

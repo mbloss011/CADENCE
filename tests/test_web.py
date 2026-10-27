@@ -98,17 +98,21 @@ async def test_token_is_required_when_configured(cfg, make_router):
         await rt.close()
 
 
-async def test_goals_and_memory_endpoints(cfg, make_router):
+async def test_tasks_and_memory_endpoints(cfg, make_router):
     rt, client = await _client(cfg, make_router())
     try:
-        g = await (await client.post("/api/goals", json={"title": "add docs", "verify_command": "true"}, headers=ORIGIN)).json()
-        assert g["status"] == "pending" and g["verify_command"] == "true"
-        rt.goals.update(rt.goals.get(g["id"]), status="proposed")
-        assert (await (await client.post(f"/api/goals/{g['id']}/approve", headers=ORIGIN)).json())["status"] == "pending"
-        assert (await client.post(f"/api/goals/{g['id']}/retry", headers=ORIGIN)).status == 409
-        await client.post("/api/memory", json={"kind": "semantic", "text": "Deploys use make release"}, headers=ORIGIN)
+        t = await (await client.post("/api/tasks", json={"title": "add docs", "verify_command": "true"}, headers=ORIGIN)).json()
+        assert t["status"] == "pending" and t["verify_command"] == "true" and t["project"] == rt.default_project.id
+        rt.tasks.update(rt.tasks.get(t["id"]), status="proposed")
+        assert (await (await client.post(f"/api/tasks/{t['id']}/approve", headers=ORIGIN)).json())["status"] == "pending"
+        assert (await client.post(f"/api/tasks/{t['id']}/retry", headers=ORIGIN)).status == 409
+        edited = await (await client.patch(f"/api/tasks/{t['id']}", json={"title": "add API docs"}, headers=ORIGIN)).json()
+        assert edited["title"] == "add API docs"
+        assert (await client.delete(f"/api/tasks/{t['id']}", headers=ORIGIN)).status == 200 and not rt.tasks.all()
+        m = await (await client.post("/api/memory", json={"kind": "semantic", "text": "Deploys use make release"}, headers=ORIGIN)).json()
         found = await (await client.get("/api/memory?q=deploys")).json()
         assert found["items"][0]["text"] == "Deploys use make release"
+        assert (await client.delete(f"/api/memory/{m['id']}", headers=ORIGIN)).status == 200 and len(rt.memory) == 0
     finally:
         await client.close()
         await rt.close()

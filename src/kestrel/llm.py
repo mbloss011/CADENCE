@@ -6,9 +6,10 @@ context compaction, tool-output distillation, goal classification.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Protocol
+from typing import Any, Protocol
 
 import httpx
 
@@ -195,29 +196,93 @@ class OpenAICompatEmbedder:
         await self._client.aclose()
 
 
+class _Slot:
+    """A stable handle on a swappable model, so agents and tools that captured `router.small`
+    keep working (with the new model) after the user switches models in the UI."""
+
+    def __init__(self, llm: LLM):
+        self.llm = llm
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.llm, name)
+
+
 class ModelRouter:
     """Holds the big, small and vision model and exposes intent-named accessors."""
 
     def __init__(self, big: LLM, small: LLM, vision: LLM | None = None):
-        self.big = big
-        self.small = small
-        self.vision = vision or big
+        self._big, self._small, self._vision = _Slot(big), _Slot(small), _Slot(vision or big)
+        self._retired: list[LLM] = []
+
+    big = property(lambda self: self._big)
+    small = property(lambda self: self._small)
+    vision = property(lambda self: self._vision)
+
+    @staticmethod
+    def _build(cfg: Config) -> tuple[LLM, LLM, LLM]:
+        big = OpenAICompatLLM(cfg.big)
+        small = big if cfg.small.name == cfg.big.name and cfg.small.base_url == cfg.big.base_url else OpenAICompatLLM(cfg.small)
+        vision = big
+        if cfg.vision and (cfg.vision.name, cfg.vision.base_url) != (cfg.big.name, cfg.big.base_url):
+            vision = OpenAICompatLLM(cfg.vision)
+        return big, small, vision
 
     @classmethod
     def from_config(cls, cfg: Config) -> "ModelRouter":
-        big = OpenAICompatLLM(cfg.big)
-        small = big if cfg.small.name == cfg.big.name and cfg.small.base_url == cfg.big.base_url else OpenAICompatLLM(cfg.small)
-        vision = None
-        if cfg.vision and (cfg.vision.name, cfg.vision.base_url) != (cfg.big.name, cfg.big.base_url):
-            vision = OpenAICompatLLM(cfg.vision)
-        return cls(big, small, vision)
+        return cls(*cls._build(cfg))
+
+    def reconfigure(self, cfg: Config) -> None:
+        """Swap in models from `cfg`. Old clients stay open until shutdown: a turn may still be streaming from them."""
+        self._retired += [s.llm for s in (self._big, self._small, self._vision)]
+        self._big.llm, self._small.llm, self._vision.llm = self._build(cfg)
 
     async def aclose(self) -> None:
-        await self.big.aclose()
-        if self.small is not self.big:
-            await self.small.aclose()
-        if self.vision is not self.big:
-            await self.vision.aclose()
+        seen: set[int] = set()
+        for llm in [s.llm for s in (self._big, self._small, self._vision)] + self._retired:
+            if id(llm) not in seen:
+                seen.add(id(llm))
+                await llm.aclose()
+
+
+async def discover_models(providers: list[Any], timeout: float = 3.0) -> list[dict[str, Any]]:
+    """Ask each local model server which models it has. LM Studio's native API adds type (llm/vlm/
+    embeddings) and load state; Ollama's adds size and family. Unreachable servers are reported, not raised."""
+    async def one(p: Any) -> dict[str, Any]:
+        root = p.url.rstrip("/").removesuffix("/v1")
+        out: dict[str, Any] = {"name": p.name, "kind": p.kind, "url": root, "base_url": f"{root}/v1",
+                               "ok": False, "error": "", "models": []}
+        headers = {"Authorization": f"Bearer {p.api_key}"} if p.api_key else {}
+        async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
+            try:
+                if p.kind == "ollama":
+                    r = await client.get(f"{root}/api/tags")
+                    r.raise_for_status()
+                    for m in r.json().get("models", []):
+                        fam = (m.get("details") or {}).get("family", "")
+                        out["models"].append({"id": m.get("name", ""), "type": "embeddings" if "bert" in fam or "embed" in m.get("name", "") else "llm",
+                                              "state": "available", "size": m.get("size"), "detail": (m.get("details") or {}).get("parameter_size", "")})
+                else:
+                    models: list[dict[str, Any]] = []
+                    if p.kind == "lmstudio":
+                        r = await client.get(f"{root}/api/v0/models")
+                        if r.status_code == 200:
+                            models = [{"id": m.get("id", ""), "type": m.get("type", "llm"), "state": m.get("state", ""),
+                                       "context": m.get("loaded_context_length") or m.get("max_context_length"),
+                                       "detail": " ".join(x for x in (m.get("arch", ""), m.get("quantization", "")) if x),
+                                       "tools": "tool_use" in (m.get("capabilities") or [])}
+                                      for m in r.json().get("data", [])]
+                    if not models:
+                        r = await client.get(f"{root}/v1/models")
+                        r.raise_for_status()
+                        models = [{"id": m.get("id", ""), "type": "embeddings" if "embed" in m.get("id", "") else "llm",
+                                   "state": ""} for m in r.json().get("data", [])]
+                    out["models"] = models
+                out["ok"] = True
+            except (httpx.HTTPError, ValueError) as exc:
+                out["error"] = f"{exc.__class__.__name__}: {exc}"[:200] or "unreachable"
+        return out
+
+    return list(await asyncio.gather(*(one(p) for p in providers)))
 
 
 IMAGE_TOKENS = 1100  # rough per-image cost for typical VLMs at default resolution

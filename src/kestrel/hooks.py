@@ -7,7 +7,8 @@ Events and their payloads (all also carry `event`, `workspace`, `agent`):
     pre_tool       {tool, arguments}                    before a tool runs  (matcher: tool-name glob)
     post_tool      {tool, arguments, result}            after a tool runs   (matcher: tool-name glob)
     stop           {text}                               agent finished a turn
-    goal_done      {goal_id, title, status, result}     a goal reached a terminal status
+    task_done      {task_id, goal_id, title, status, result}   a task reached a terminal status ("goal_done" is an alias)
+    goal_achieved  {goal_id, title, assessment}         the planner judged a long-horizon goal achieved
 
 Shell protocol (mirrors Claude Code): the payload is JSON on stdin.
   exit 0 → stdout, if any, is added as context (user_prompt: appended to the prompt;
@@ -34,7 +35,8 @@ from .config import HookConfig
 
 log = logging.getLogger(__name__)
 
-EVENTS = ("session_start", "user_prompt", "pre_tool", "post_tool", "stop", "goal_done")
+EVENTS = ("session_start", "user_prompt", "pre_tool", "post_tool", "stop", "task_done", "goal_achieved")
+ALIASES = {"goal_done": "task_done"}  # ≤0.2 name
 MATCHED = ("pre_tool", "post_tool")
 
 
@@ -67,9 +69,20 @@ class Hooks:
         self.workspace = Path(workspace or Path.cwd())
         self.shell: list[HookConfig] = []
         self.py: list[_PyHook] = []
-        for h in shell_hooks or []:
+        self.set_shell(shell_hooks or [])
+
+    def set_shell(self, hooks: list[HookConfig]) -> None:
+        """Replace the shell hooks in place (scoped copies share this list, so they see the change)."""
+        for h in hooks:
+            h.event = ALIASES.get(h.event, h.event)
             self._check(h.event)
-            self.shell.append(h)
+        self.shell[:] = hooks
+
+    def scoped(self, workspace: Path) -> "Hooks":
+        """Same hooks, run with a different working directory (one per project)."""
+        clone = Hooks.__new__(Hooks)
+        clone.workspace, clone.shell, clone.py = Path(workspace), self.shell, self.py
+        return clone
 
     @staticmethod
     def _check(event: str) -> None:
@@ -77,8 +90,12 @@ class Hooks:
             raise ValueError(f"unknown hook event {event!r}; expected one of {', '.join(EVENTS)}")
 
     def on(self, event: str, fn: Callable[[dict[str, Any]], Any], matcher: str = "*", owner: str = "") -> None:
+        event = ALIASES.get(event, event)
         self._check(event)
         self.py.append(_PyHook(event, fn, matcher, owner))
+
+    def remove_owner(self, owner: str) -> None:
+        self.py[:] = [h for h in self.py if h.owner != owner]
 
     def count(self) -> int:
         return len(self.shell) + len(self.py)

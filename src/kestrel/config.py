@@ -1,8 +1,14 @@
-"""Configuration: defaults < ~/.kestrel/config.yaml < ./.kestrel/config.yaml < env vars."""
+"""Configuration: defaults < ~/.kestrel/config.yaml < ./.kestrel/config.yaml < ~/.kestrel/settings.json < env vars.
+
+`settings.json` is written by the web UI. It uses the same keys as config.yaml, but lists in it
+(hooks, mcp_servers, providers) replace the lists from the YAML files instead of extending them.
+"""
 
 from __future__ import annotations
 
+import json
 import os
+import tempfile
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -70,6 +76,22 @@ class HookConfig:
 
 
 @dataclass
+class Provider:
+    """A local model server to discover models on (LM Studio, Ollama, or any OpenAI-compatible URL)."""
+
+    name: str
+    kind: str = "lmstudio"  # lmstudio | ollama | openai
+    url: str = "http://127.0.0.1:1234"
+    api_key: str = ""
+
+
+DEFAULT_PROVIDERS = [
+    Provider("LM Studio", "lmstudio", "http://127.0.0.1:1234"),
+    Provider("Ollama", "ollama", "http://127.0.0.1:11434"),
+]
+
+
+@dataclass
 class Config:
     big: ModelConfig = field(default_factory=lambda: ModelConfig(name="ornith-1.5-9b", context_window=32768))
     small: ModelConfig = field(
@@ -90,12 +112,16 @@ class Config:
     allow_shell: bool = True
     auto_approve_ideas: bool = False  # autonomously generated goals wait for `goals approve` unless true
     max_parallel_goals: int = 2
+    goal_daily_tasks: int = 6       # tasks the planner may start per long-horizon goal per day
     vision: ModelConfig | None = None  # image understanding; None = use the big model
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     hooks: list[HookConfig] = field(default_factory=list)
     plugin_dirs: list[Path] = field(default_factory=list)
     disabled_plugins: list[str] = field(default_factory=list)
+    disabled_skills: list[str] = field(default_factory=list)
+    providers: list[Provider] = field(default_factory=lambda: [Provider(**vars(p)) for p in DEFAULT_PROVIDERS])
+    browser: dict[str, Any] = field(default_factory=dict)  # executable, headless, width, height
     channels: dict[str, dict[str, Any]] = field(default_factory=dict)  # telegram / whatsapp settings
 
     def __post_init__(self) -> None:
@@ -114,6 +140,10 @@ class Config:
     @property
     def state_dir(self) -> Path:
         return self.home / "state"
+
+    @property
+    def settings_path(self) -> Path:
+        return self.home / "settings.json"
 
 
 def _merge_model(base: ModelConfig, data: dict[str, Any]) -> ModelConfig:
@@ -138,45 +168,86 @@ def expand_env(value: Any) -> Any:
     return value
 
 
-def _apply(cfg: Config, data: dict[str, Any]) -> None:
+SCALARS = {
+    "max_iterations", "tool_timeout", "compact_trigger", "compact_target", "keep_recent_messages",
+    "tool_output_limit", "reflection_cycles", "max_reflections_per_goal", "allow_shell",
+    "auto_approve_ideas", "max_parallel_goals", "goal_daily_tasks",
+}
+
+
+def _apply(cfg: Config, data: dict[str, Any], *, replace_lists: bool = False) -> None:
+    """Layer one config dict onto `cfg` in place (nested objects are mutated, so live holders see changes)."""
     if not isinstance(data, dict):
         return
     _merge_model(cfg.big, data.get("big", {}) or {})
     _merge_model(cfg.small, data.get("small", {}) or {})
-    scalars = {
-        "max_iterations", "tool_timeout", "compact_trigger", "compact_target", "keep_recent_messages",
-        "tool_output_limit", "reflection_cycles", "max_reflections_per_goal", "allow_shell",
-        "auto_approve_ideas", "max_parallel_goals",
-    }
-    for key in scalars & data.keys():
+    for key in SCALARS & data.keys():
         setattr(cfg, key, data[key])
     if "skill_dirs" in data:
         cfg.skill_dirs = [Path(p).expanduser() for p in data["skill_dirs"]]
-    if data.get("vision"):
-        cfg.vision = _merge_model(ModelConfig(name=cfg.big.name, base_url=cfg.big.base_url, api_key=cfg.big.api_key),
-                                  data["vision"])
+    if "vision" in data:
+        if not data["vision"]:
+            cfg.vision = None
+        else:
+            cfg.vision = _merge_model(cfg.vision or ModelConfig(name=cfg.big.name, base_url=cfg.big.base_url,
+                                                                api_key=cfg.big.api_key), data["vision"])
     _merge(cfg.memory, data.get("memory") or {})
     _merge(cfg.sandbox, data.get("sandbox") or {})
+    if "hooks" in data and replace_lists:
+        cfg.hooks.clear()
     for spec in data.get("hooks") or []:
         cfg.hooks.append(HookConfig(event=spec["event"], command=spec["command"], matcher=str(spec.get("matcher", "*")),
                                     timeout=float(spec.get("timeout", 30.0))))
     plugins = data.get("plugins") or {}
     if "dirs" in plugins:
         cfg.plugin_dirs = [Path(p).expanduser() for p in plugins["dirs"]]
-    cfg.disabled_plugins = list(plugins.get("disabled", cfg.disabled_plugins))
+    # in place: registries hold references to these lists
+    cfg.disabled_plugins[:] = list(plugins.get("disabled", cfg.disabled_plugins))
+    cfg.disabled_skills[:] = list((data.get("skills") or {}).get("disabled", cfg.disabled_skills))
     for name, spec in (data.get("channels") or {}).items():
         cfg.channels[name] = {**cfg.channels.get(name, {}), **(spec or {})}
+    if "mcp_servers" in data and replace_lists:
+        cfg.mcp_servers.clear()
     for name, spec in (data.get("mcp_servers") or {}).items():
-        cfg.mcp_servers = [s for s in cfg.mcp_servers if s.name != name]
+        cfg.mcp_servers[:] = [s for s in cfg.mcp_servers if s.name != name]
         cfg.mcp_servers.append(
             McpServerConfig(
                 name=name,
                 command=spec["command"],
-                args=list(spec.get("args", [])),
+                args=[str(a) for a in spec.get("args", [])],
                 env={k: str(v) for k, v in (spec.get("env") or {}).items()},
                 enabled=bool(spec.get("enabled", True)),
             )
         )
+    if "providers" in data:
+        cfg.providers[:] = [Provider(name=str(p.get("name") or p.get("kind", "server")), kind=str(p.get("kind", "openai")),
+                                     url=str(p.get("url", "")).rstrip("/"), api_key=str(p.get("api_key", "")))
+                            for p in data["providers"] or [] if p.get("url")]
+    if "browser" in data:
+        cfg.browser.update(data["browser"] or {})
+
+
+def read_settings(cfg: Config) -> dict[str, Any]:
+    try:
+        data = json.loads(cfg.settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def write_settings(cfg: Config, data: dict[str, Any]) -> None:
+    cfg.settings_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=cfg.settings_path.parent, suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)
+    os.replace(tmp, cfg.settings_path)
+
+
+ENV_LOCKS = {  # env var → the setting it pins, so the UI can say why an edit will not survive a restart
+    "LMSTUDIO_URL": "big.base_url", "KESTREL_BIG_MODEL": "big.name", "KESTREL_SMALL_MODEL": "small.name",
+    "KESTREL_BIG_URL": "big.base_url", "KESTREL_SMALL_URL": "small.base_url", "KESTREL_SANDBOX": "sandbox.mode",
+    "KESTREL_MEMORY_BACKEND": "memory.backend",
+}
 
 
 def load_config(workspace: Path | None = None) -> Config:
@@ -184,6 +255,7 @@ def load_config(workspace: Path | None = None) -> Config:
     for path in (cfg.home / "config.yaml", cfg.workspace / ".kestrel" / "config.yaml"):
         if path.is_file():
             _apply(cfg, yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+    _apply(cfg, read_settings(cfg), replace_lists=True)
 
     env = os.environ
     if env.get("LMSTUDIO_URL"):

@@ -295,13 +295,13 @@ async def test_bwrap_timeout_kills_command(tmp_path):
 
 @needs_bwrap
 async def test_goal_verify_runs_inside_sandbox(cfg, make_router):
-    from test_goals import make_runner, reflection
-    from kestrel.goals import Goal
+    from test_tasks import make_runner, reflection
+    from kestrel.tasks import Task
 
     router = make_router(big_script=[Completion(content="did it"), reflection("done")])
     runner, store, _ = make_runner(cfg, router)
     runner.sandbox = Sandbox(SandboxConfig(mode="bwrap"), cfg.workspace)
-    goal = store.add(Goal(title="t", verify_command="touch /etc/kestrel_should_fail"))
+    goal = store.add(Task(title="t", verify_command="touch /etc/kestrel_should_fail"))
     await runner.run(goal)
     assert goal.reflections[0]["verify"]["exit"] != 0  # /etc is read-only inside the sandbox
 

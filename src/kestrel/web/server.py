@@ -1,4 +1,4 @@
-"""Web GUI backend: REST for state, one WebSocket for live agent/goal events, static React build.
+"""Web GUI backend: REST for state, one WebSocket for live events, static React build.
 
     kestrel web                 # http://127.0.0.1:8765 — runs chat sessions, the daemon and channels
 
@@ -6,6 +6,9 @@ Security: binds to loopback by default. Every request must carry a loopback (or 
 which defeats DNS rebinding, and state-changing requests/WebSockets must come from a matching Origin,
 which stops other websites in your browser from driving the agent. Binding to a non-loopback address
 requires a token (auto-generated and printed if not given).
+
+Routes are split by area: work.py (projects, goals, tasks, ideas), extensions.py (settings, models,
+skills, plugins, MCP, hooks), files.py (file explorer, canvas, browser).
 """
 
 from __future__ import annotations
@@ -25,16 +28,16 @@ from urllib.parse import urlsplit
 from aiohttp import WSMsgType, web
 
 from ..agent import Agent, Event
-from ..goals import Goal
 from ..llm import LLMError, OpenAICompatLLM, content_text
 from ..runtime import Runtime
-from ..vision import MIME, MAX_IMAGE_BYTES
+from ..vision import MAX_IMAGE_BYTES, MIME
 
 log = logging.getLogger(__name__)
 
 STATIC = Path(__file__).parent / "static"
 STEER_PREFIX = "[steering from user — adjust course accordingly] "
 HOOK_MARK = "\n\n[context from hooks]\n"
+WRITE_TOOLS = ("write_file", "edit_file", "canvas_export")
 
 
 # ───────────────────────────────────────────────────────────── transcripts
@@ -66,8 +69,8 @@ def transcript(agent: Agent) -> list[dict[str, Any]]:
     return items
 
 
-def _title(agent: Agent) -> str:
-    for m in agent.ctx.messages:
+def _first_user_text(messages: list[dict[str, Any]]) -> str:
+    for m in messages:
         if m.get("role") == "user":
             text = content_text(m.get("content")).replace("[image]", "🖼").strip()
             if not text.startswith(STEER_PREFIX):
@@ -75,10 +78,22 @@ def _title(agent: Agent) -> str:
     return "New chat"
 
 
-def _summary(sid: str, title: str, updated: float, running: bool, live: bool) -> dict[str, Any]:
-    """Sessions started by background goals are flagged so the UI can label them."""
-    kind = "goal" if title.startswith("GOAL: ") else "chat"
-    return {"id": sid, "title": title.removeprefix("GOAL: "), "kind": kind, "updated": updated, "running": running, "live": live}
+def _summary(sid: str, title: str, updated: float, running: bool, live: bool, project: str, agent: str = "") -> dict[str, Any]:
+    """Sessions started by background tasks are flagged so the UI can label them."""
+    kind = "task" if title.startswith(("TASK: ", "GOAL: ")) or agent.startswith(("task-", "goal-")) else "chat"
+    return {"id": sid, "title": title.removeprefix("TASK: ").removeprefix("GOAL: "), "kind": kind, "updated": updated,
+            "running": running, "live": live, "project": project}
+
+
+def touched_path(name: str, arguments: Any) -> str:
+    """The workspace path a file-writing tool call targets, so the explorer can mark agent edits."""
+    if name not in WRITE_TOOLS:
+        return ""
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else dict(arguments or {})
+    except (ValueError, TypeError):
+        return ""
+    return str(args.get("path", ""))
 
 
 # ──────────────────────────────────────────────────────────────── sessions
@@ -94,7 +109,8 @@ class LiveSession:
         return self.task is not None and not self.task.done()
 
     def summary(self) -> dict[str, Any]:
-        return _summary(self.agent.session_id, _title(self.agent), self.updated, self.running, True)
+        a = self.agent
+        return _summary(a.session_id, _first_user_text(a.ctx.messages), self.updated, self.running, True, a.project, a.name)
 
 
 class Hub:
@@ -104,13 +120,19 @@ class Hub:
         self.rt = rt
         self.sessions: dict[str, LiveSession] = {}
         self.clients: set[web.WebSocketResponse] = set()
+        self.watching: dict[web.WebSocketResponse, set[str]] = {}  # ws → projects whose browser it streams
         self.notices: list[dict[str, Any]] = []
-        self.goal_activity: dict[str, dict[str, Any]] = {}
-        self.inbox = rt.cfg.workspace / ".kestrel" / "inbox" / "web"
+        self.task_activity: dict[str, dict[str, Any]] = {}
+        self.inbox = rt.cfg.state_dir / "uploads"
+        rt.listeners.append(self.broadcast)
 
     async def broadcast(self, msg: dict[str, Any]) -> None:
+        if msg.get("kind") == "browser_frame":  # frames are large: only to viewers of that browser
+            targets = [ws for ws, ps in self.watching.items() if msg.get("project") in ps]
+        else:
+            targets = list(self.clients)
         data = json.dumps(msg, default=str)
-        for ws in list(self.clients):
+        for ws in targets:
             try:
                 await ws.send_str(data)
             except (ConnectionError, RuntimeError):
@@ -124,37 +146,33 @@ class Hub:
         live = self.sessions.get(sid)
         if live:
             return live
-        agent = self.rt.new_agent("web")
-        agent.load_session(sid)  # raises OSError/ValueError if unknown
-        live = LiveSession(agent)
+        live = LiveSession(self.rt.load_agent(sid))  # raises OSError/ValueError if unknown
         live.updated = (self.session_dir() / f"{sid}.json").stat().st_mtime
         self.sessions[sid] = live
         return live
 
-    def create(self) -> LiveSession:
-        live = LiveSession(self.rt.new_agent("web"))
+    def create(self, project: str = "") -> LiveSession:
+        live = LiveSession(self.rt.new_agent("web", project))
         self.sessions[live.agent.session_id] = live
         return live
 
-    def list(self) -> list[dict[str, Any]]:
-        out = {sid: s.summary() for sid, s in self.sessions.items()}
+    def list(self, project: str | None = None) -> list[dict[str, Any]]:
+        out = {sid: s.summary() for sid, s in self.sessions.items() if s.agent.ctx.messages or s.running}
         d = self.session_dir()
         if d.is_dir():
             for f in d.glob("*.json"):
-                if f.stem in out:
+                if f.stem in out or f.stem in self.sessions:
                     continue
                 try:
                     data = json.loads(f.read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
                     continue
-                title = "New chat"
-                for m in data.get("messages", []):
-                    if m.get("role") == "user":
-                        title = content_text(m.get("content")).replace("[image]", "🖼").split(HOOK_MARK)[0].strip()[:70] or "Image"
-                        break
                 if data.get("messages"):
-                    out[f.stem] = _summary(f.stem, title, f.stat().st_mtime, False, False)
-        return sorted(out.values(), key=lambda s: s["updated"], reverse=True)
+                    out[f.stem] = _summary(f.stem, _first_user_text(data["messages"]), f.stat().st_mtime, False, False,
+                                           data.get("project", ""), data.get("agent", ""))
+        default = self.rt.default_project.id
+        items = [s for s in out.values() if project is None or (s["project"] or default) == project]
+        return sorted(items, key=lambda s: s["updated"], reverse=True)
 
     def delete(self, sid: str) -> None:
         live = self.sessions.pop(sid, None)
@@ -175,23 +193,34 @@ class Hub:
         return "started"
 
     async def _turn(self, live: LiveSession, text: str, images: list[Path]) -> None:
-        sid = live.agent.session_id
+        a = live.agent
+        sid = a.session_id
         live.updated = time.time()
-        await self.broadcast({"kind": "turn", "session": sid, "state": "started", "title": _title(live.agent) if live.agent.ctx.messages else text[:70]})
+        await self.broadcast({"kind": "turn", "session": sid, "state": "started", "project": a.project,
+                              "title": _first_user_text(a.ctx.messages) if a.ctx.messages else text[:70]})
         try:
-            async for ev in live.agent.run(text, images):
+            async for ev in a.run(text, images):
                 if ev.type == "status":
                     live.usage = {"tokens": ev.data["tokens"], "window": ev.data["window"], "iteration": ev.data["iteration"]}
                 await self.broadcast({"kind": "agent", "session": sid, "event": {"type": ev.type, "data": ev.data}})
-                if ev.type == "tool_result" and ev.data.get("name") == "todo_write":
-                    await self.broadcast({"kind": "todos", "session": sid, "todos": live.agent.todos})
+                await self._side_effects(a.project, ev, sid, a)
         except Exception as exc:  # noqa: BLE001 — surface, never kill the server
             log.exception("turn crashed")
             await self.broadcast({"kind": "agent", "session": sid, "event": {"type": "error", "data": {"message": f"{exc.__class__.__name__}: {exc}"}}})
         finally:
             live.updated = time.time()
-            live.agent.save_session()
-            await self.broadcast({"kind": "turn", "session": sid, "state": "finished", "title": _title(live.agent)})
+            a.save_session()
+            await self.broadcast({"kind": "turn", "session": sid, "state": "finished", "title": _first_user_text(a.ctx.messages),
+                                  "project": a.project})
+
+    async def _side_effects(self, project: str, ev: Event, sid: str = "", agent: Agent | None = None) -> None:
+        if ev.type == "tool_call":
+            path = touched_path(ev.data.get("name", ""), ev.data.get("arguments"))
+            if path:
+                await self.broadcast({"kind": "file_changed", "project": project or self.rt.default_project.id,
+                                      "path": path, "by": "agent"})
+        elif ev.type == "tool_result" and ev.data.get("name") == "todo_write" and agent is not None:
+            await self.broadcast({"kind": "todos", "session": sid, "todos": agent.todos})
 
     # --------------------------------------------------------------- daemon
     async def notify(self, level: str, message: str) -> None:
@@ -199,12 +228,15 @@ class Hub:
         self.notices = (self.notices + [n])[-100:]
         await self.broadcast(n)
 
-    async def goal_event(self, gid: str, ev: Event) -> None:
+    async def task_event(self, tid: str, ev: Event) -> None:
+        task = self.rt.tasks.get(tid)
+        if task:
+            await self._side_effects(task.project, ev)
         if ev.type in ("tool_call", "message_done", "error", "compaction"):
             act = {"type": ev.type, "at": time.time(),
                    "text": ev.data.get("name") or ev.data.get("text", "")[:200] or ev.data.get("message", "") or ev.data.get("detail", "")}
-            self.goal_activity[gid] = act
-            await self.broadcast({"kind": "goal_activity", "goal": gid, "activity": act})
+            self.task_activity[tid] = act
+            await self.broadcast({"kind": "task_activity", "task": tid, "activity": act})
 
 
 HUB_KEY: web.AppKey["Hub"] = web.AppKey("hub")
@@ -254,22 +286,31 @@ def security_middleware(allowed_hosts: set[str], token: str | None):
     return mw
 
 
+async def body(req: web.Request) -> dict[str, Any]:
+    """The JSON body as a dict; a malformed one is a 400, not a 500."""
+    if not req.can_read_body:
+        return {}
+    try:
+        data = await req.json()
+    except (ValueError, UnicodeDecodeError):
+        raise web.HTTPBadRequest(text="expected a JSON body")
+    if not isinstance(data, dict):
+        raise web.HTTPBadRequest(text="expected a JSON object")
+    return data
+
+
 # ────────────────────────────────────────────────────────────────── routes
-def _goal_dict(g: Goal, hub: Hub) -> dict[str, Any]:
-    d = asdict(g)
-    d["activity"] = hub.goal_activity.get(g.id)
-    return d
-
-
 def build_app(rt: Runtime, *, allowed_hosts: set[str] | None = None, token: str | None = None) -> web.Application:
+    from . import extensions, files, work
+
     hub = Hub(rt)
     app = web.Application(middlewares=[security_middleware(allowed_hosts or set(), token)],
-                          client_max_size=MAX_IMAGE_BYTES + 1024 * 1024)
+                          client_max_size=max(MAX_IMAGE_BYTES, files.MAX_UPLOAD) + 1024 * 1024)
     app[HUB_KEY] = hub
     r = web.RouteTableDef()
 
     @r.get("/api/status")
-    async def status(_req: web.Request) -> web.Response:
+    async def status(req: web.Request) -> web.Response:
         cfg, d = rt.cfg, rt.daemon
         models = {}
         for role, mc in (("big", cfg.big), ("small", cfg.small)):
@@ -280,37 +321,40 @@ def build_app(rt: Runtime, *, allowed_hosts: set[str] | None = None, token: str 
                 models[role] = {"name": mc.name, "url": mc.base_url, "ok": False, "error": str(exc)[:160]}
             finally:
                 await probe.aclose()
+        scope = rt.scope(req.query.get("project", ""))
         return web.json_response({
             "version": __import__("kestrel").__version__,
-            "workspace": str(cfg.workspace),
+            "workspace": str(scope.project.path),
             "models": models,
             "vision": cfg.vision.name if cfg.vision else cfg.big.name,
             "memory": {**rt.memory.stats(), "backend": cfg.memory.backend, "embedder": cfg.memory.embed_model,
                        "error": rt.memory.last_error},
-            "sandbox": {"mode": rt.sandbox.mode, "network": cfg.sandbox.network},
+            "sandbox": {"mode": rt.sandbox.mode, "network": cfg.sandbox.network, "problem": rt.sandbox.check()},
             "plugins": [{"name": p.name, "origin": p.origin, "tools": p.tools} for p in rt.plugins.loaded.values()],
             "plugin_errors": rt.plugins.errors,
             "hooks": [{"event": h.event, "matcher": h.matcher, "command": h.command} for h in rt.hooks.shell]
                      + [{"event": h.event, "matcher": h.matcher, "command": f"plugin:{h.owner}"} for h in rt.hooks.py],
             "mcp": [{"name": n, "connected": c, "tools": t, "error": e} for n, c, t, e in rt.mcp.status()],
-            "skills": [{"name": s.name, "description": s.description} for s in rt.skills.skills.values()],
+            "skills": [{"name": s.name, "description": s.description} for s in scope.skills.skills.values()],
             "tools": [{"name": t.name, "source": t.source, "description": t.description, "read_only": t.read_only}
-                      for t in rt.registry.tools.values()],
+                      for t in scope.registry.all().values()],
             "channels": [c.name for c in app.get(CHANNELS_KEY, [])],
+            "restart_required": sorted(rt.restart_required),
             "daemon": None if d is None else {
-                "running": d.running, "cycles_today": d.cycles_today, "cycles_per_day": cfg.reflection_cycles,
-                "interval_h": d.interval / 3600, "last_tick": d.last_tick, "paused": d.paused,
-                "auto_approve": cfg.auto_approve_ideas, "max_parallel": cfg.max_parallel_goals},
+                "running": d.running, "planning": d.planning, "cycles_today": d.cycles_today,
+                "cycles_per_day": cfg.reflection_cycles, "interval_h": d.interval / 3600, "last_tick": d.last_tick,
+                "paused": d.paused, "auto_approve": cfg.auto_approve_ideas, "max_parallel": cfg.max_parallel_goals},
             "notices": hub.notices[-30:],
         })
 
     @r.get("/api/sessions")
-    async def sessions(_req: web.Request) -> web.Response:
-        return web.json_response(hub.list())
+    async def sessions(req: web.Request) -> web.Response:
+        return web.json_response(hub.list(req.query.get("project") or None))
 
     @r.post("/api/sessions")
-    async def new_session(_req: web.Request) -> web.Response:
-        return web.json_response(hub.create().summary())
+    async def new_session(req: web.Request) -> web.Response:
+        data = await body(req)
+        return web.json_response(hub.create(str(data.get("project", ""))).summary())
 
     @r.get("/api/sessions/{sid}")
     async def get_session(req: web.Request) -> web.Response:
@@ -350,62 +394,6 @@ def build_app(rt: Runtime, *, allowed_hosts: set[str] | None = None, token: str 
                 fh.write(chunk)
         return web.json_response({"id": dest.name, "name": part.filename})
 
-    @r.get("/api/goals")
-    async def goals(_req: web.Request) -> web.Response:
-        return web.json_response([_goal_dict(g, hub) for g in reversed(rt.goals.list())])
-
-    @r.post("/api/goals")
-    async def add_goal(req: web.Request) -> web.Response:
-        body = await req.json()
-        title = str(body.get("title", "")).strip()
-        if not title:
-            raise web.HTTPBadRequest(text="title required")
-        goal = Goal(title=title[:120], description=str(body.get("description", "") or title),
-                    acceptance=[str(a) for a in body.get("acceptance", []) if str(a).strip()],
-                    verify_command=str(body.get("verify_command", "") or ""))
-        (rt.daemon.submit(goal) if rt.daemon else rt.goals.add(goal))
-        return web.json_response(_goal_dict(goal, hub))
-
-    @r.post("/api/goals/{gid}/{action}")
-    async def goal_action(req: web.Request) -> web.Response:
-        goal = rt.goals.get(req.match_info["gid"])
-        if not goal:
-            raise web.HTTPNotFound(text="no such goal")
-        action = req.match_info["action"]
-        if action == "approve" and goal.status == "proposed":
-            rt.goals.update(goal, status="pending")
-        elif action == "reject" and goal.status in ("proposed", "pending"):
-            rt.goals.update(goal, status="failed", result="rejected from the web UI")
-        elif action == "retry" and goal.status in ("failed", "blocked", "done"):
-            rt.goals.update(goal, status="pending")
-        elif action == "interrupt":
-            live = rt.runner.agents.get(goal.id)
-            if live:
-                live.interrupt()
-        elif action == "steer":
-            live = rt.runner.agents.get(goal.id)
-            text = str((await req.json()).get("text", "")).strip()
-            if not live or not text:
-                raise web.HTTPConflict(text="goal is not running")
-            live.steer(text)
-        else:
-            raise web.HTTPConflict(text=f"cannot {action} a {goal.status} goal")
-        if rt.daemon:
-            rt.daemon.wake()
-        return web.json_response(_goal_dict(goal, hub))
-
-    @r.post("/api/daemon/{action}")
-    async def daemon_action(req: web.Request) -> web.Response:
-        if not rt.daemon:
-            raise web.HTTPConflict(text="daemon not running (start `kestrel web` without --no-daemon)")
-        action = req.match_info["action"]
-        if action in ("pause", "resume"):
-            rt.daemon.paused = action == "pause"
-            rt.daemon.wake()
-        else:
-            raise web.HTTPNotFound()
-        return web.json_response({"paused": rt.daemon.paused})
-
     @r.get("/api/memory")
     async def memory(req: web.Request) -> web.Response:
         q, kind = req.query.get("q", "").strip(), req.query.get("kind") or None
@@ -415,16 +403,22 @@ def build_app(rt: Runtime, *, allowed_hosts: set[str] | None = None, token: str 
 
     @r.post("/api/memory")
     async def add_memory(req: web.Request) -> web.Response:
-        body = await req.json()
+        data = await body(req)
         try:
-            item = rt.memory.add(str(body.get("kind", "semantic")), str(body.get("text", "")), list(body.get("tags") or []))
+            item = rt.memory.add(str(data.get("kind", "semantic")), str(data.get("text", "")), list(data.get("tags") or []))
         except ValueError as exc:
             raise web.HTTPBadRequest(text=str(exc))
         return web.json_response(asdict(item))
 
+    @r.delete("/api/memory/{mid}")
+    async def delete_memory(req: web.Request) -> web.Response:
+        if not rt.memory.delete(req.match_info["mid"]):
+            raise web.HTTPNotFound(text="no such memory")
+        return web.json_response({"ok": True})
+
     @r.get("/api/ws")
     async def ws_handler(req: web.Request) -> web.WebSocketResponse:
-        ws = web.WebSocketResponse(heartbeat=25)
+        ws = web.WebSocketResponse(heartbeat=25, max_msg_size=8 * 1024 * 1024)
         await ws.prepare(req)
         hub.clients.add(ws)
         try:
@@ -435,16 +429,23 @@ def build_app(rt: Runtime, *, allowed_hosts: set[str] | None = None, token: str 
                 try:
                     data = json.loads(msg.data)
                     await _ws_op(hub, ws, data)
-                except (ValueError, KeyError, OSError) as exc:
+                except (ValueError, KeyError, OSError, TypeError) as exc:
                     await ws.send_str(json.dumps({"kind": "error", "message": str(exc), "ref": data.get("ref") if isinstance(data, dict) else None}))
         finally:
             hub.clients.discard(ws)
+            for pid in hub.watching.pop(ws, set()):
+                await rt.browser.get(pid).watch(False)
         return ws
 
+    work.routes(r, rt, hub)
+    extensions.routes(r, rt, hub)
+    files.routes(r, rt, hub)
     app.add_routes(r)
 
     async def spa(req: web.Request) -> web.StreamResponse:
         rel = req.match_info.get("path", "")
+        if rel.startswith("api/"):
+            raise web.HTTPNotFound(text="no such API route")
         target = (STATIC / rel).resolve()
         if rel and target.is_file() and STATIC.resolve() in target.parents:
             return web.FileResponse(target, headers={"Cache-Control": "public, max-age=31536000, immutable"}
@@ -484,8 +485,47 @@ async def _ws_op(hub: Hub, ws: web.WebSocketResponse, data: dict[str, Any]) -> N
         live = hub.sessions.get(sid)
         if live and live.running:
             live.agent.interrupt()
+    elif op == "browser_watch":
+        await _browser_watch(hub, ws, hub.rt.project(str(data.get("project", ""))).id, bool(data.get("on")))
+    elif op == "browser":
+        await _browser_input(hub, ws, data)
     else:
         raise ValueError(f"unknown op {op!r}")
+
+
+async def _browser_watch(hub: Hub, ws: web.WebSocketResponse, pid: str, on: bool) -> None:
+    mine = hub.watching.setdefault(ws, set())
+    if on == (pid in mine):
+        return
+    (mine.add if on else mine.discard)(pid)
+    session = hub.rt.browser.get(pid)
+    await session.watch(on)
+    if on:
+        await ws.send_str(json.dumps(session.state(), default=str))
+        frame = await session.frame() if session.started else None
+        if frame:
+            await ws.send_str(json.dumps(frame))
+
+
+async def _browser_input(hub: Hub, ws: web.WebSocketResponse, data: dict[str, Any]) -> None:
+    from ..browser import BrowserError
+
+    pid = hub.rt.project(str(data.get("project", ""))).id
+    session = hub.rt.browser.get(pid)
+    action = str(data.get("action", ""))
+    args = {k: v for k, v in data.items() if k not in ("op", "project", "action", "ref")}
+    try:
+        if action == "close":
+            await session.close()
+            return
+        was_started = session.started
+        await session.act("user", action, **args)
+        if not was_started:
+            await session.resume_cast()  # viewers may have opened the panel before the browser existed
+    except BrowserError as exc:
+        await ws.send_str(json.dumps({"kind": "browser_error", "project": pid, "message": str(exc)}))
+    except Exception as exc:  # noqa: BLE001 — navigation timeouts etc. are user-visible, not fatal
+        await ws.send_str(json.dumps({"kind": "browser_error", "project": pid, "message": f"{exc.__class__.__name__}: {str(exc)[:300]}"}))
 
 
 # ───────────────────────────────────────────────────────────────── runner
@@ -507,17 +547,17 @@ async def serve(rt: Runtime, host: str, port: int, *, daemon: bool = True, chann
     if daemon:
         async def notify(kind: str, message: str) -> None:
             await hub.notify(kind, message)
-            if kind == "goal" and message[:1] in "✔✖":
+            if kind in ("task", "goal") and message[:1] in "✔✖★?":
                 for ch in chans:
                     await ch.broadcast(message)
-        d = rt.make_daemon(notify, hub.goal_event)
+        d = rt.make_daemon(notify, hub.task_event)
         tasks.append(asyncio.create_task(d.run_forever(), name="daemon"))
     for ch in chans:
         async def run_channel(c=ch) -> None:
             try:
                 await c.run(stop)
             except Exception as exc:  # noqa: BLE001
-                await hub.notify("goal", f"✖ channel {c.name} stopped: {exc}")
+                await hub.notify("task", f"✖ channel {c.name} stopped: {exc}")
         tasks.append(asyncio.create_task(run_channel(), name=f"channel-{ch.name}"))
 
     runner = web.AppRunner(app, access_log=None)

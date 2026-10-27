@@ -26,6 +26,8 @@ from typing import Any, Protocol
 
 import httpx
 
+from .store import atomic_write
+
 log = logging.getLogger(__name__)
 
 KINDS = ("episodic", "semantic", "procedural")
@@ -255,6 +257,16 @@ class MemoryStore:
             with self.path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(asdict(item), ensure_ascii=False) + "\n")
         return item
+
+    def delete(self, mid: str) -> bool:
+        """Forget one memory. Its vector stays in the index but is ignored (ranking skips unknown ids)."""
+        with self._lock:
+            keep = [i for i in self._items if i.id != mid]
+            if len(keep) == len(self._items):
+                return False
+            self._items = keep
+            atomic_write(self.path, "".join(json.dumps(asdict(i), ensure_ascii=False) + "\n" for i in keep))
+        return True
 
     # ------------------------------------------------------------- retrieval
     def _keyword_scores(self, query: str, kind: str | None) -> dict[str, float]:

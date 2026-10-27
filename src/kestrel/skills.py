@@ -30,13 +30,19 @@ class Skill:
 
 
 class SkillRegistry:
-    def __init__(self, dirs: list[Path]):
+    """`skills` holds the enabled skills the agent sees; `found` also includes disabled ones (for the UI).
+    `disabled` is shared with the config, so toggling a skill there applies on the next `scan()`."""
+
+    def __init__(self, dirs: list[Path], disabled: list[str] | None = None):
         self.dirs = dirs
+        self.disabled = disabled if disabled is not None else []
         self.skills: dict[str, Skill] = {}
+        self.found: dict[str, Skill] = {}
         self.errors: list[str] = []
 
     def scan(self) -> None:
         self.skills.clear()
+        self.found.clear()
         self.errors.clear()
         for root in self.dirs:  # later dirs override earlier ones (workspace beats user)
             if not root.is_dir():
@@ -47,7 +53,8 @@ class SkillRegistry:
                 except Exception as exc:  # noqa: BLE001
                     self.errors.append(f"{skill_md}: {exc}")
                     continue
-                self.skills[skill.name] = skill
+                self.found[skill.name] = skill
+        self.skills.update({n: sk for n, sk in self.found.items() if n not in self.disabled})
 
     @staticmethod
     def _parse(path: Path) -> Skill:

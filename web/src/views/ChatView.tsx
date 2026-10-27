@@ -1,37 +1,69 @@
 import clsx from "clsx";
-import { ArrowDown, CheckCircle2, Circle, CircleDot, Image as ImageIcon, ListChecks, PanelRightClose, PanelRightOpen, Sparkles, Target, Wrench } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowDown, CheckCircle2, Circle, CircleDot, Globe, ListChecks, NotebookPen, Sparkles, Wrench, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
+import { BrowserPanel } from "../components/BrowserPanel";
+import { CanvasPanel } from "../components/CanvasPanel";
 import { Composer } from "../components/Composer";
 import { MessageItem } from "../components/Messages";
 import { ContextMeter, Dot, Spinner } from "../components/ui";
 import type { Status } from "../lib/api";
-import { useStore } from "../lib/store";
+import { useStore, type DockTab } from "../lib/store";
 
 const STARTERS = [
   { icon: Wrench, text: "Run the test suite and fix anything that fails" },
-  { icon: Target, text: "Find the riskiest function in this repo and add tests for it" },
-  { icon: ImageIcon, text: "Look at the attached screenshot and tell me what's wrong" },
+  { icon: NotebookPen, text: "Write a design doc for this project on the canvas" },
+  { icon: Globe, text: "Open the docs for the main library we use and summarize what changed recently" },
   { icon: Sparkles, text: "Explain how this codebase is structured" },
 ];
+
+const DOCK: { id: DockTab; label: string; icon: typeof Globe }[] = [
+  { id: "plan", label: "Plan", icon: ListChecks },
+  { id: "canvas", label: "Canvas", icon: NotebookPen },
+  { id: "browser", label: "Browser", icon: Globe },
+];
+
+function useDockWidth() {
+  const [w, setW] = useState(() => {
+    try {
+      return Number(localStorage.getItem("kestrel.dockw")) || 520;
+    } catch {
+      return 520;
+    }
+  });
+  const start = (e: PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const x0 = e.clientX;
+    const w0 = w;
+    const move = (ev: globalThis.PointerEvent) => setW(Math.max(320, Math.min(window.innerWidth * 0.7, w0 + (x0 - ev.clientX))));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setW((cur) => {
+        try {
+          localStorage.setItem("kestrel.dockw", String(Math.round(cur)));
+        } catch {
+          /* storage unavailable */
+        }
+        return cur;
+      });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  return { width: w, start };
+}
 
 export function ChatView({ sid, status, onNew }: { sid: string | null; status: Status | null; onNew: (text?: string) => void }) {
   const store = useStore();
   const chat = sid ? store.chats[sid] : undefined;
   const scroller = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
-  const [rail, setRail] = useState(() => localStorage.getItem("kestrel.rail") !== "0");
+  const dock = store.dock.tab;
+  const { width, start } = useDockWidth();
 
   useEffect(() => {
     if (sid && !store.chats[sid]?.loaded) store.loadChat(sid).catch(() => undefined);
   }, [sid]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("kestrel.rail", rail ? "1" : "0");
-    } catch {
-      /* storage unavailable */
-    }
-  }, [rail]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -57,7 +89,6 @@ export function ChatView({ sid, status, onNew }: { sid: string | null; status: S
   const items = chat?.items ?? [];
   const running = !!chat?.running;
   const waiting = running && (items.length === 0 || items[items.length - 1].kind === "user" || items[items.length - 1].kind === "steer");
-  const todos = chat?.todos ?? [];
 
   return (
     <div className="flex h-full min-w-0 flex-1">
@@ -79,9 +110,15 @@ export function ChatView({ sid, status, onNew }: { sid: string | null; status: S
             </span>
           )}
           {chat?.usage && <ContextMeter tokens={chat.usage.tokens} window={chat.usage.window} compact />}
-          <button onClick={() => setRail((r) => !r)} className="btn-ghost hidden px-2 lg:inline-flex" title="Toggle side panel">
-            {rail ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-          </button>
+          <div className="hidden items-center rounded-lg border border-line p-0.5 lg:flex">
+            {DOCK.map(({ id, label, icon: Icon }) => (
+              <button key={id} onClick={() => store.setDock({ tab: dock === id ? null : id })} title={label}
+                className={clsx("flex items-center gap-1 rounded-md px-2 py-1 text-[12px] transition", dock === id ? "bg-raised text-ink" : "text-faint hover:text-ink")}>
+                <Icon size={14} className={dock === id ? "text-brand" : ""} />
+                <span className="hidden xl:inline">{label}</span>
+              </button>
+            ))}
+          </div>
         </header>
 
         <div ref={scroller} onScroll={onScroll} className="relative flex-1 overflow-y-auto">
@@ -112,44 +149,67 @@ export function ChatView({ sid, status, onNew }: { sid: string | null; status: S
         <Composer running={running} disabled={!store.connected} onSend={(t, u) => (sid ? send(t, u) : onNew(t))} onStop={stop} />
       </div>
 
-      {rail && sid && (
-        <aside className="hidden w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l border-line bg-panel/40 p-4 lg:flex">
-          <section>
-            <div className="label flex items-center gap-1.5"><ListChecks size={12} /> Task list</div>
-            {todos.length === 0 ? (
-              <p className="text-[13px] text-faint">The agent writes a plan here for multi-step work.</p>
-            ) : (
-              <ul className="space-y-1.5">
-                {todos.map((t, i) => (
-                  <li key={i} className="flex items-start gap-2 text-[13px]">
-                    {t.status === "done" ? <CheckCircle2 size={15} className="mt-px shrink-0 text-ok" />
-                      : t.status === "in_progress" ? <CircleDot size={15} className="mt-px shrink-0 animate-pulse text-brand" />
-                      : <Circle size={15} className="mt-px shrink-0 text-faint" />}
-                    <span className={clsx(t.status === "done" && "text-faint line-through")}>{t.content}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-          <section>
-            <div className="label">Context</div>
-            {chat?.usage ? <ContextMeter tokens={chat.usage.tokens} window={chat.usage.window} /> : <p className="text-[13px] text-faint">—</p>}
-            <p className="mt-1.5 text-[12px] text-faint">
-              The small model compacts automatically at 70%{chat?.compactions ? ` · ${chat.compactions} compaction(s) so far` : ""}.
-            </p>
-          </section>
-          {status && (
-            <section className="space-y-1.5 text-[12.5px]">
-              <div className="label">Session</div>
-              <Row k="big" v={status.models.big.name} ok={status.models.big.ok} />
-              <Row k="small" v={status.models.small.name} ok={status.models.small.ok} />
-              <Row k="vision" v={status.vision} ok />
-              <Row k="sandbox" v={status.sandbox.mode + (status.sandbox.network ? "" : " · offline")} ok={status.sandbox.mode !== "none"} warn={status.sandbox.mode === "none"} />
-              <Row k="memory" v={`${status.memory.backend} · ${status.memory.total}`} ok={!status.memory.error} />
-              <div className="pt-1 font-mono text-[11px] text-faint">session {sid}</div>
-            </section>
-          )}
+      {dock && (
+        <aside className="relative hidden shrink-0 flex-col border-l border-line bg-panel/40 lg:flex" style={{ width: dock === "plan" ? 288 : width }}>
+          {dock !== "plan" && <div onPointerDown={start} className="absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize hover:bg-brand/20" />}
+          <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2">
+            {DOCK.map(({ id, label }) => (
+              <button key={id} onClick={() => store.setDock({ tab: id })}
+                className={clsx("rounded-md px-2.5 py-1 text-[12.5px]", dock === id ? "bg-raised text-ink" : "text-muted hover:text-ink")}>{label}</button>
+            ))}
+            <button onClick={() => store.setDock({ tab: null })} className="btn-ghost ml-auto px-1.5" aria-label="close panel"><X size={14} /></button>
+          </div>
+          <div className="min-h-0 flex-1">
+            {dock === "plan" && <PlanPanel sid={sid} status={status} />}
+            {dock === "canvas" && <CanvasPanel />}
+            {dock === "browser" && <BrowserPanel />}
+          </div>
         </aside>
+      )}
+    </div>
+  );
+}
+
+function PlanPanel({ sid, status }: { sid: string | null; status: Status | null }) {
+  const store = useStore();
+  const chat = sid ? store.chats[sid] : undefined;
+  const todos = chat?.todos ?? [];
+  return (
+    <div className="flex h-full flex-col gap-5 overflow-y-auto p-4">
+      <section>
+        <div className="label flex items-center gap-1.5"><ListChecks size={12} /> Task list</div>
+        {todos.length === 0 ? (
+          <p className="text-[13px] text-faint">The agent writes a plan here for multi-step work.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {todos.map((t, i) => (
+              <li key={i} className="flex items-start gap-2 text-[13px]">
+                {t.status === "done" ? <CheckCircle2 size={15} className="mt-px shrink-0 text-ok" />
+                  : t.status === "in_progress" ? <CircleDot size={15} className="mt-px shrink-0 animate-pulse text-brand" />
+                  : <Circle size={15} className="mt-px shrink-0 text-faint" />}
+                <span className={clsx(t.status === "done" && "text-faint line-through")}>{t.content}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section>
+        <div className="label">Context</div>
+        {chat?.usage ? <ContextMeter tokens={chat.usage.tokens} window={chat.usage.window} /> : <p className="text-[13px] text-faint">—</p>}
+        <p className="mt-1.5 text-[12px] text-faint">
+          The small model compacts automatically at 70%{chat?.compactions ? ` · ${chat.compactions} compaction(s) so far` : ""}.
+        </p>
+      </section>
+      {status && (
+        <section className="space-y-1.5 text-[12.5px]">
+          <div className="label">Session</div>
+          <Row k="big" v={status.models.big.name} ok={status.models.big.ok} />
+          <Row k="small" v={status.models.small.name} ok={status.models.small.ok} />
+          <Row k="vision" v={status.vision} ok />
+          <Row k="sandbox" v={status.sandbox.mode + (status.sandbox.network ? "" : " · offline")} ok={status.sandbox.mode !== "none" && !status.sandbox.problem} warn={status.sandbox.mode === "none"} />
+          <Row k="memory" v={`${status.memory.backend} · ${status.memory.total}`} ok={!status.memory.error} />
+          {sid && <div className="pt-1 font-mono text-[11px] text-faint">session {sid}</div>}
+        </section>
       )}
     </div>
   );
@@ -171,8 +231,8 @@ function Welcome({ status, onPick }: { status: Status | null; onPick: (t: string
       <Logo className="mb-5 h-12 w-12" />
       <h2 className="text-2xl font-semibold tracking-tight">What should we build?</h2>
       <p className="mt-2 text-center text-sm text-muted">
-        Kestrel reads, edits and runs code in <span className="font-mono text-ink">{status?.workspace.split("/").pop() ?? "your workspace"}</span>.
-        Steer it mid-task, interrupt with Esc, or drop in a screenshot.
+        Kestrel reads, edits and runs code in <span className="font-mono text-ink">{status?.workspace.replace(/^\/home\/[^/]+/, "~") ?? "your project"}</span>.
+        Steer it mid-task, interrupt with Esc, drop in a screenshot, or work together on the canvas and in the browser.
       </p>
       <div className="mt-8 grid w-full gap-2 sm:grid-cols-2">
         {STARTERS.map(({ icon: Icon, text }) => (

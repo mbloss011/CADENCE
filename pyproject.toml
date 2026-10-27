@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kestrel-agent"
-version = "0.2.0"
-description = "Async, autonomous, local-first coder agent with MCP client, Agent Skills, goal reflection loop and a big/small model split."
+version = "0.3.0"
+description = "Async, autonomous, local-first coder agent: projects, long-horizon goals, canvas, shared browser, MCP, skills, plugins and a web UI."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,7 +18,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+browser = ["playwright>=1.47"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "playwright>=1.47"]
 
 [project.scripts]
 kestrel = "kestrel.cli:main"

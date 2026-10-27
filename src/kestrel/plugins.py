@@ -79,6 +79,7 @@ class LoadedPlugin:
     name: str
     origin: str
     tools: list[str] = field(default_factory=list)
+    hooks: int = 0
 
 
 class PluginManager:
@@ -87,6 +88,7 @@ class PluginManager:
         self.disabled = set(disabled or [])
         self.loaded: dict[str, LoadedPlugin] = {}
         self.errors: list[str] = []
+        self._ctx: tuple[Any, ...] = ()
 
     def discover(self) -> list[tuple[str, str, Callable[[], Any]]]:
         """(name, origin, loader) for every plugin found; loaders import lazily."""
@@ -109,20 +111,62 @@ class PluginManager:
         return found
 
     def load(self, registry: ToolRegistry, hooks: Hooks, cfg: Any, memory: Any = None) -> None:
+        self._ctx = (registry, hooks, cfg, memory)
         for name, origin, loader in self.discover():
-            if name in self.disabled or name in self.loaded:
-                continue
-            try:
-                obj = loader()
-                register = getattr(obj, "register", obj if callable(obj) else None)
-                if not callable(register):
-                    raise TypeError("plugin has no register(api) function")
-                api = PluginAPI(name, registry, hooks, cfg, memory)
-                register(api)
-                self.loaded[name] = LoadedPlugin(name, origin, api.tools)
-            except Exception as exc:  # noqa: BLE001 — one broken plugin must not stop startup
-                self.errors.append(f"{name} ({origin}): {exc.__class__.__name__}: {exc}")
-                log.warning("plugin %s failed to load: %s", name, exc)
+            if name not in self.disabled and name not in self.loaded:
+                self._load_one(name, origin, loader)
+
+    def _load_one(self, name: str, origin: str, loader: Callable[[], Any]) -> bool:
+        registry, hooks, cfg, memory = self._ctx
+        self.errors = [e for e in self.errors if not e.startswith(f"{name} (")]
+        before = len(hooks.py)
+        try:
+            obj = loader()
+            register = getattr(obj, "register", obj if callable(obj) else None)
+            if not callable(register):
+                raise TypeError("plugin has no register(api) function")
+            api = PluginAPI(name, registry, hooks, cfg, memory)
+            register(api)
+            self.loaded[name] = LoadedPlugin(name, origin, api.tools, len(hooks.py) - before)
+            return True
+        except Exception as exc:  # noqa: BLE001 — one broken plugin must not stop startup
+            registry.unregister_source(f"plugin:{name}")  # drop whatever it registered before failing
+            hooks.remove_owner(name)
+            self.errors.append(f"{name} ({origin}): {exc.__class__.__name__}: {exc}")
+            log.warning("plugin %s failed to load: %s", name, exc)
+            return False
+
+    def unload(self, name: str) -> None:
+        registry, hooks, _cfg, _memory = self._ctx
+        registry.unregister_source(f"plugin:{name}")
+        hooks.remove_owner(name)
+        self.loaded.pop(name, None)
+        sys.modules.pop(f"kestrel_plugin_{name}", None)
+
+    def reload(self, name: str) -> bool:
+        """Re-import a plugin from disk (after an edit). False if it is unknown, disabled or fails."""
+        self.unload(name)
+        for n, origin, loader in self.discover():
+            if n == name and n not in self.disabled:
+                return self._load_one(n, origin, loader)
+        return False
+
+    def sync(self, disabled: list[str]) -> None:
+        """Apply a new disabled list: unload newly disabled plugins, load newly enabled ones."""
+        self.disabled = set(disabled)
+        for name in [n for n in self.loaded if n in self.disabled]:
+            self.unload(name)
+        for name, origin, loader in self.discover():
+            if name not in self.disabled and name not in self.loaded:
+                self._load_one(name, origin, loader)
+
+    def path_of(self, name: str) -> Path | None:
+        """The editable source file of a directory plugin (None for entry points)."""
+        for d in self.dirs:
+            for cand in (d / f"{name}.py", d / name / "__init__.py"):
+                if cand.is_file():
+                    return cand
+        return None
 
 
 def _import_file(name: str, path: Path) -> Any:

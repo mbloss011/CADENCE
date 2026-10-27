@@ -7,7 +7,7 @@ from pathlib import Path
 
 from kestrel.autonomy import Daemon
 from kestrel.config import McpServerConfig, load_config
-from kestrel.goals import Goal
+from kestrel.tasks import Task
 from kestrel.llm import Completion, OpenAICompatLLM
 from kestrel.mcp_host import McpHost
 from kestrel.memory import MemoryStore
@@ -104,7 +104,7 @@ async def test_llm_stream_parser_assembles_tool_calls_from_sse(monkeypatch):
 
 
 async def test_daemon_runs_pending_goal_and_heartbeat_cycle(cfg, make_router):
-    from test_goals import make_runner, reflection
+    from test_tasks import make_runner, reflection
 
     cfg.reflection_cycles = 6
     ideas = json.dumps([{"title": "Add docs for CLI"}])
@@ -118,16 +118,22 @@ async def test_daemon_runs_pending_goal_and_heartbeat_cycle(cfg, make_router):
     async def notify(kind, msg):
         notes.append(f"{kind}:{msg}")
 
-    daemon = Daemon(cfg, runner, store, notify)
-    goal = daemon.submit(Goal(title="do the thing"))
+    from kestrel.ideas import IdeaStore, ideate
+    ideas = IdeaStore(cfg.state_dir / "ideas.json")
+
+    async def cycle() -> int:
+        return len(await ideate(router, ideas, store, memory, project="", workspace=cfg.workspace))
+
+    daemon = Daemon(cfg, runner, store, notify, ideate=cycle)
+    goal = daemon.submit(Task(title="do the thing"))
     task = asyncio.create_task(daemon.run_forever())
     for _ in range(100):
         await asyncio.sleep(0.05)
-        if store.get(goal.id).status == "done" and daemon.cycles_today >= 1 and len(store.list()) >= 2:
+        if store.get(goal.id).status == "done" and daemon.cycles_today >= 1 and len(ideas.list()) >= 1:
             break
     daemon.stop()
     await asyncio.wait_for(task, 5)
     assert store.get(goal.id).status == "done"
     assert daemon.cycles_today == 1 and any(n.startswith("cycle:") for n in notes)
-    proposed = [g for g in store.list() if g.source == "auto"]
-    assert proposed and proposed[0].status == "proposed"  # autonomous ideas wait for approval by default
+    assert [i.title for i in ideas.list()] == ["Add docs for CLI"] and ideas.list()[0].status == "new"
+    assert len(store.list()) == 1  # ideas wait in the inbox; they do not become tasks by default

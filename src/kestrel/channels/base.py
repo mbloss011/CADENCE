@@ -1,7 +1,7 @@
 """Chat bridge shared by all messaging channels.
 
 Each chat gets its own persistent agent session. While a turn is running, further messages from that
-chat steer it instead of queueing a second turn. Slash commands manage sessions and goals.
+chat steer it instead of queueing a second turn. Slash commands manage sessions, tasks, goals and ideas.
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
 from ..goals import Goal
+from ..ideas import promote_to_task
+from ..tasks import Task
 from ..llm import LLMError
 
 log = logging.getLogger(__name__)
@@ -22,9 +24,10 @@ Reply = Callable[[str], Awaitable[None]]
 HELP = """Kestrel commands:
 /new — start a fresh session
 /stop — interrupt the running turn
-/goal <text> — queue a goal for the daemon (verify → reflect → retry)
-/goals — list goals
-/approve <id> — approve a proposed goal
+/task <text> — queue a task for the daemon (verify → reflect → retry)
+/goal <text> — set a long-horizon goal the planner works toward
+/goals · /tasks · /ideas — list them
+/approve <id> — promote an idea to a task (or approve a proposed task)
 /status — session and daemon status
 Anything else is sent to the agent. Photos are passed to the vision model."""
 
@@ -110,33 +113,53 @@ class Bridge:
                 st.agent.interrupt()
                 return "⏹ interrupting"
             return "nothing is running"
+        if cmd == "/task":
+            if not arg:
+                return "usage: /task <description>"
+            task = Task(title=arg[:80], description=arg)
+            if self.rt.daemon:
+                self.rt.daemon.submit(task)
+                return f"queued task {task.id} — I'll report back when it finishes"
+            self.rt.tasks.add(task)
+            return f"queued task {task.id} (the daemon is not running, so it will start with `kestrel daemon`)"
         if cmd == "/goal":
             if not arg:
-                return "usage: /goal <description>"
-            goal = Goal(title=arg[:80], description=arg)
-            if self.rt.daemon:
-                self.rt.daemon.submit(goal)
-                return f"queued goal {goal.id} — I'll report back when it finishes"
-            self.rt.goals.add(goal)
-            return f"queued goal {goal.id} (the daemon is not running, so it will start with `kestrel daemon`)"
-        if cmd == "/goals":
-            goals = self.rt.goals.list()[-15:]
-            return "\n".join(f"{g.id} [{g.status}] {g.title}" for g in goals) or "no goals"
-        if cmd == "/approve":
-            goal = self.rt.goals.get(arg)
-            if not goal or goal.status != "proposed":
-                return "no such proposed goal"
-            self.rt.goals.update(goal, status="pending")
+                return "usage: /goal <what you want to achieve>"
+            goal = self.rt.goals.add(Goal(title=arg[:160], description=arg))
             if self.rt.daemon:
                 self.rt.daemon.wake()
-            return f"approved {goal.id}"
+            return f"goal {goal.id} set — I'll plan tasks toward it and report progress"
+        if cmd == "/goals":
+            goals = [g for g in self.rt.goals.all() if g.status in ("active", "paused")][-15:]
+            return "\n".join(f"{g.id} [{g.status} {g.progress}%] {g.title}" + (f"\n  ? {g.question}" if g.question else "")
+                             for g in goals) or "no goals"
+        if cmd == "/tasks":
+            tasks = self.rt.tasks.list()[-15:]
+            return "\n".join(f"{t.id} [{t.status}] {t.title}" for t in tasks) or "no tasks"
+        if cmd == "/ideas":
+            ideas = self.rt.ideas.list("new")[-15:]
+            return "\n".join(f"{i.id} ({i.size}) {i.title}" for i in ideas) or "no new ideas"
+        if cmd == "/approve":
+            idea = self.rt.ideas.get(arg)
+            if idea and idea.status == "new":
+                task = promote_to_task(self.rt.ideas, self.rt.tasks, idea)
+                msg = f"idea {idea.id} → task {task.id}"
+            else:
+                task = self.rt.tasks.get(arg)
+                if not task or task.status != "proposed":
+                    return "no such new idea or proposed task"
+                self.rt.tasks.update(task, status="pending")
+                msg = f"approved {task.id}"
+            if self.rt.daemon:
+                self.rt.daemon.wake()
+            return msg
         if cmd == "/status":
             st = self.chats.get(chat_id)
             d = self.rt.daemon
             bits = [f"session {st.agent.session_id} ({'busy' if st.busy else 'idle'})" if st else "no session yet",
                     f"models {self.rt.cfg.big.name} / {self.rt.cfg.small.name}"]
             if d:
-                bits.append(f"daemon running {len(d.running)} goal(s), cycles {d.cycles_today}/{self.rt.cfg.reflection_cycles}")
+                bits.append(f"daemon running {len(d.running)} task(s), cycles {d.cycles_today}/{self.rt.cfg.reflection_cycles}")
             return "\n".join(bits)
         return f"unknown command {cmd} — /help"
 

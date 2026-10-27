@@ -1,245 +1,267 @@
 import clsx from "clsx";
-import { Check, ChevronDown, CornerDownRight, Pause, Play, Plus, RotateCcw, Square, Target, X } from "lucide-react";
+import {
+  Archive, CheckCircle2, ChevronRight, Circle, CircleDot, Compass, Flag, HelpCircle, Loader2, MessageSquarePlus, Pause, Pencil, Play, Plus,
+  Sparkles, Target, Trophy, XCircle,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { Empty, GoalBadge, PageHeader, ago } from "../components/ui";
-import { api, type Goal, type Status } from "../lib/api";
+import { act, ago, ConfirmButton, Empty, Field, GoalBadge, Modal, PageHeader, Progress } from "../components/ui";
+import { api, type Goal, type JournalEntry, type Status, type TaskStatus } from "../lib/api";
 import { useStore } from "../lib/store";
 
-const FILTERS = ["all", "active", "proposed", "pending", "done", "failed"] as const;
-
-export function GoalsView({ status, refreshStatus }: { status: Status | null; refreshStatus: () => void }) {
-  const { liveTick, notices } = useStore();
+export function GoalsView({ status, onOpenSession: _open }: { status: Status | null; refreshStatus: () => void; onOpenSession: (sid: string) => void }) {
+  const { liveTick, project } = useStore();
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
-  const [showForm, setShowForm] = useState(false);
-  const [error, setError] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Goal | null | "new">(null);
+  const [showDone, setShowDone] = useState(false);
 
-  const load = useCallback(() => api.goals().then(setGoals).catch((e) => setError(e.message)), []);
+  const load = useCallback(() => api.goals(project).then((g) => {
+    setGoals(g);
+    setSelected((s) => (s && g.some((x) => x.id === s) ? s : g.find((x) => x.status === "active" || x.status === "paused")?.id ?? g[0]?.id ?? null));
+  }).catch(() => undefined), [project]);
   useEffect(() => {
     void load();
-    const t = setInterval(load, 4000);
+    const t = setInterval(load, 6000);
     return () => clearInterval(t);
   }, [load]);
   useEffect(() => void load(), [liveTick, load]);
 
-  const act = async (g: Goal, action: Parameters<typeof api.goalAction>[1], text?: string) => {
-    setError("");
-    try {
-      await api.goalAction(g.id, action, text);
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
+  const open = goals.filter((g) => g.status === "active" || g.status === "paused");
+  const closed = goals.filter((g) => g.status === "achieved" || g.status === "archived");
+  const goal = goals.find((g) => g.id === selected) ?? null;
   const d = status?.daemon;
-  const shown = goals.filter((g) => filter === "all" || g.status === filter || (filter === "failed" && g.status === "blocked"));
-  const count = (s: string) => goals.filter((g) => g.status === s || (s === "failed" && g.status === "blocked")).length;
 
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
       <PageHeader
         title="Goals"
-        subtitle={
-          d ? (
-            <span>
-              Daemon {d.paused ? <b className="text-warn">paused</b> : "running"} · heartbeat every {d.interval_h.toFixed(1)}h ·{" "}
-              {d.cycles_today}/{d.cycles_per_day} idea cycles today · {d.running.length}/{d.max_parallel} goals active
-              {d.auto_approve ? " · ideas auto-approved" : " · ideas wait for approval"}
-            </span>
-          ) : (
-            "Daemon is off — goals queue until `kestrel web` runs with the daemon."
-          )
-        }
-        actions={
-          <>
-            {d && (
-              <button className="btn-outline" onClick={() => api.daemon(d.paused ? "resume" : "pause").then(refreshStatus)}>
-                {d.paused ? <><Play size={14} /> Resume</> : <><Pause size={14} /> Pause</>}
+        subtitle={<span>Long-horizon objectives. The planner assesses progress, breaks out the next tasks, and keeps going until every success criterion is met.
+          {!d && " The daemon is off, so planning only happens when you press “Plan next steps”."}</span>}
+        actions={<button className="btn-primary" onClick={() => setEditing("new")}><Plus size={15} /> New goal</button>}
+      />
+      {goals.length === 0 ? (
+        <div className="flex-1 overflow-y-auto">
+          <Empty icon={<Target size={18} />} title="No goals yet">
+            A goal is something worth working toward over days, like “Ship v1 of the billing API” or “Get test coverage above 80%”.
+            Kestrel plans the steps, runs them as tasks, learns from the results and reports progress.
+            <div className="mt-4"><button className="btn-primary" onClick={() => setEditing("new")}><Plus size={14} /> Set your first goal</button></div>
+          </Empty>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <div className="w-80 shrink-0 space-y-1.5 overflow-y-auto border-r border-line p-3">
+            {open.map((g) => <GoalRow key={g.id} g={g} active={g.id === selected} onClick={() => setSelected(g.id)} />)}
+            {closed.length > 0 && (
+              <button onClick={() => setShowDone((s) => !s)} className="flex w-full items-center gap-1.5 px-2 pt-3 text-[11px] font-medium uppercase tracking-wide text-faint hover:text-muted">
+                <ChevronRight size={12} className={clsx("transition", showDone && "rotate-90")} /> Achieved & archived ({closed.length})
               </button>
             )}
-            <button className="btn-primary" onClick={() => setShowForm((s) => !s)}>
-              <Plus size={15} /> New goal
-            </button>
-          </>
-        }
-      />
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl space-y-4 px-6 py-5">
-          {showForm && <GoalForm onDone={() => { setShowForm(false); void load(); }} />}
-          {error && <div className="rounded-lg bg-bad/10 px-3 py-2 text-sm text-bad">{error}</div>}
-
-          <div className="flex flex-wrap gap-1.5">
-            {FILTERS.map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={clsx("rounded-full border px-3 py-1 text-xs capitalize transition",
-                  filter === f ? "border-brand/50 bg-brand/10 text-brand" : "border-line text-muted hover:text-ink")}
-              >
-                {f} {f !== "all" && <span className="text-faint">{count(f)}</span>}
-              </button>
-            ))}
+            {showDone && closed.map((g) => <GoalRow key={g.id} g={g} active={g.id === selected} onClick={() => setSelected(g.id)} />)}
           </div>
-
-          {shown.length === 0 ? (
-            <Empty icon={<Target size={18} />} title={filter === "all" ? "No goals yet" : `No ${filter} goals`}>
-              Goals run in the background with act → verify → reflect → retry. Add one, or let the daemon propose ideas.
-            </Empty>
-          ) : (
-            <div className="space-y-2.5">
-              {shown.map((g) => <GoalCard key={g.id} g={g} act={act} />)}
-            </div>
-          )}
-
-          {notices.length > 0 && (
-            <div className="card p-4">
-              <div className="label">Activity</div>
-              <ul className="space-y-1 font-mono text-[12px] text-muted">
-                {notices.slice(-12).reverse().map((n, i) => (
-                  <li key={i}><span className="text-faint">{new Date(n.at * 1000).toLocaleTimeString()}</span> {n.message}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function GoalCard({ g, act }: { g: Goal; act: (g: Goal, a: Parameters<typeof api.goalAction>[1], text?: string) => Promise<void> }) {
-  const [open, setOpen] = useState(g.status === "active");
-  const [steer, setSteer] = useState("");
-  return (
-    <div className={clsx("card overflow-hidden", g.status === "active" && "border-brand/40 shadow-glow")}>
-      <div className="flex items-start gap-3 p-4">
-        <button onClick={() => setOpen((o) => !o)} className="mt-0.5 text-faint hover:text-ink" aria-label="expand">
-          <ChevronDown size={16} className={clsx("transition", !open && "-rotate-90")} />
-        </button>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <GoalBadge status={g.status} />
-            {g.source === "auto" && <span className="chip border-line text-faint">idea</span>}
-            <span className="font-mono text-[11px] text-faint">{g.id}</span>
-            <span className="text-[11px] text-faint">· {ago(g.updated)} · {g.attempts} attempt{g.attempts === 1 ? "" : "s"}</span>
+          <div className="min-w-0 flex-1 overflow-y-auto">
+            {goal ? <GoalDetail g={goal} reload={load} onEdit={() => setEditing(goal)} daemon={!!d} /> : <Empty icon={<Target size={18} />} title="Pick a goal" />}
           </div>
-          <div className="mt-1.5 text-[14.5px] font-medium leading-snug">{g.title}</div>
-          {g.status === "active" && g.activity && (
-            <div className="mt-1 truncate font-mono text-[12px] text-brand/90">⚙ {g.activity.text}</div>
-          )}
-        </div>
-        <div className="flex shrink-0 gap-1.5">
-          {g.status === "proposed" && (
-            <>
-              <button className="btn-outline px-2.5 py-1 text-ok" onClick={() => act(g, "approve")}><Check size={14} /> Approve</button>
-              <button className="btn-ghost px-2" onClick={() => act(g, "reject")} title="Reject"><X size={14} /></button>
-            </>
-          )}
-          {g.status === "active" && (
-            <button className="btn-danger px-2.5 py-1" onClick={() => act(g, "interrupt")}><Square size={11} fill="currentColor" /> Stop</button>
-          )}
-          {["failed", "blocked", "done"].includes(g.status) && (
-            <button className="btn-ghost px-2.5 py-1" onClick={() => act(g, "retry")} title="Run again"><RotateCcw size={13} /> Retry</button>
-          )}
-        </div>
-      </div>
-      {open && (
-        <div className="space-y-3 border-t border-line bg-bg/40 px-4 py-3 pl-11 text-[13px]">
-          {g.description && g.description !== g.title && <p className="whitespace-pre-wrap text-muted">{g.description}</p>}
-          {g.acceptance.length > 0 && (
-            <div>
-              <div className="label">Acceptance</div>
-              <ul className="list-disc space-y-0.5 pl-4 text-muted">{g.acceptance.map((a, i) => <li key={i}>{a}</li>)}</ul>
-            </div>
-          )}
-          {g.verify_command && (
-            <div>
-              <div className="label">Verify</div>
-              <code className="rounded bg-raised px-1.5 py-0.5 font-mono text-[12px]">{g.verify_command}</code>
-            </div>
-          )}
-          {g.status === "active" && (
-            <form
-              className="flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (steer.trim()) void act(g, "steer", steer.trim()).then(() => setSteer(""));
-              }}
-            >
-              <input className="input" placeholder="Steer this goal…" value={steer} onChange={(e) => setSteer(e.target.value)} />
-              <button className="btn-outline shrink-0" disabled={!steer.trim()}><CornerDownRight size={14} /> Steer</button>
-            </form>
-          )}
-          {g.reflections.length > 0 && (
-            <div>
-              <div className="label">Reflections</div>
-              <ol className="space-y-1.5">
-                {g.reflections.map((r) => (
-                  <li key={r.attempt} className="flex gap-2">
-                    <span className={clsx("chip shrink-0", r.verdict === "done" ? "border-ok/40 text-ok" : r.verdict === "blocked" ? "border-flame/40 text-flame" : "border-warn/40 text-warn")}>
-                      #{r.attempt} {r.verdict}
-                    </span>
-                    <span className="text-muted">
-                      {r.verify && <span className={clsx("mr-1.5 font-mono text-[11px]", r.verify.exit === 0 ? "text-ok" : "text-bad")}>verify exit {r.verify.exit}</span>}
-                      {r.critique}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-          {g.result && g.status !== "active" && (
-            <div>
-              <div className="label">Result</div>
-              <p className="whitespace-pre-wrap text-muted">{g.result}</p>
-            </div>
-          )}
         </div>
       )}
+      <GoalForm open={editing !== null} goal={editing === "new" ? null : editing} onClose={() => setEditing(null)}
+        onSaved={(g) => { void load(); setSelected(g.id); }} />
     </div>
   );
 }
 
-function GoalForm({ onDone }: { onDone: () => void }) {
+function GoalRow({ g, active, onClick }: { g: Goal; active: boolean; onClick: () => void }) {
+  const running = g.tasks.some((t) => t.status === "active");
+  return (
+    <button onClick={onClick} className={clsx("w-full rounded-xl border p-3 text-left transition",
+      active ? "border-brand/40 bg-raised shadow-glow" : "border-transparent hover:border-line hover:bg-raised/50")}>
+      <div className="flex items-center gap-2">
+        {g.status === "achieved" ? <Trophy size={14} className="shrink-0 text-ok" />
+          : g.question ? <HelpCircle size={14} className="shrink-0 text-warn" />
+          : running || g.planning ? <Loader2 size={14} className="shrink-0 animate-spin text-brand" />
+          : <Target size={14} className={clsx("shrink-0", g.status === "active" ? "text-brand" : "text-faint")} />}
+        <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium">{g.title}</span>
+        <span className="font-mono text-[11px] text-faint">{g.progress}%</span>
+      </div>
+      <Progress value={g.progress} className="mt-2" />
+      <div className="mt-1.5 truncate text-[11.5px] text-faint">
+        {g.question ? <span className="text-warn">Needs you: {g.question}</span>
+          : g.planning ? "planning next steps…"
+          : running ? `working: ${g.tasks.find((t) => t.status === "active")?.title}`
+          : g.status === "paused" ? "paused" : `${g.tasks.filter((t) => t.status === "done").length} task(s) done · ${ago(g.updated)}`}
+      </div>
+    </button>
+  );
+}
+
+const TASK_ICON: Record<TaskStatus, typeof Circle> = {
+  proposed: Circle, pending: Circle, active: CircleDot, done: CheckCircle2, failed: XCircle, blocked: XCircle,
+};
+const JOURNAL_ICON: Record<string, typeof Circle> = {
+  plan: Compass, task: Flag, achieved: Trophy, question: HelpCircle, user: MessageSquarePlus, created: Sparkles, edit: Pencil, error: XCircle,
+};
+
+function GoalDetail({ g, reload, onEdit, daemon }: { g: Goal; reload: () => void; onEdit: () => void; daemon: boolean }) {
+  const [note, setNote] = useState("");
+  const set = async (changes: Parameters<typeof api.editGoal>[1], ok?: string) => {
+    await act(() => api.editGoal(g.id, changes), ok);
+    reload();
+  };
+  const plan = async () => {
+    await act(() => api.goalAction(g.id, "plan"), daemon ? "Planning on the next tick" : "Planned");
+    reload();
+  };
+  const sendNote = async () => {
+    if (!note.trim()) return;
+    await act(() => api.goalAction(g.id, "note", note.trim()), g.question ? "Answer sent; the planner will continue" : "Note added to the journal");
+    setNote("");
+    reload();
+  };
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-5 px-6 py-5">
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <GoalBadge status={g.status} />
+          <span className="text-[11px] text-faint">started {ago(g.created)} · {g.tasks_today} task(s) planned today</span>
+          <div className="ml-auto flex items-center gap-1">
+            {g.status === "active" && <button className="btn-ghost px-2.5 py-1" onClick={() => set({ status: "paused" }, "Paused")}><Pause size={13} /> Pause</button>}
+            {(g.status === "paused" || g.status === "archived") && <button className="btn-ghost px-2.5 py-1" onClick={() => set({ status: "active" }, "Resumed")}><Play size={13} /> Resume</button>}
+            {g.status !== "achieved" && <button className="btn-ghost px-2.5 py-1 text-ok" onClick={() => set({ status: "achieved", progress: 100 }, "Marked achieved")}><Trophy size={13} /> Achieved</button>}
+            {g.status !== "archived" && <button className="btn-ghost px-2" onClick={() => set({ status: "archived" }, "Archived")} title="Archive"><Archive size={13} /></button>}
+            <button className="btn-ghost px-2" onClick={onEdit} title="Edit"><Pencil size={13} /></button>
+            <ConfirmButton onConfirm={async () => { await act(() => api.deleteGoal(g.id), "Goal deleted"); reload(); }} />
+          </div>
+        </div>
+        <h2 className="mt-2 text-xl font-semibold tracking-tight">{g.title}</h2>
+        {g.description && g.description !== g.title && <p className="mt-1.5 whitespace-pre-wrap text-[13.5px] leading-relaxed text-muted">{g.description}</p>}
+      </div>
+
+      <div className="card p-4">
+        <div className="flex items-center gap-3">
+          <div className="text-2xl font-semibold tabular-nums">{g.progress}%</div>
+          <Progress value={g.progress} className="h-2 flex-1" />
+          {g.status !== "achieved" && (
+            <button className="btn-outline shrink-0" onClick={plan} disabled={g.planning}>
+              {g.planning ? <Loader2 size={14} className="animate-spin" /> : <Compass size={14} />} {g.planning ? "Planning…" : "Plan next steps"}
+            </button>
+          )}
+        </div>
+        {g.assessment && <p className="mt-3 text-[13.5px] leading-relaxed">{g.assessment}</p>}
+        {!g.assessment && <p className="mt-3 text-[13px] text-faint">No assessment yet. The planner writes one each time it reviews the goal.</p>}
+      </div>
+
+      {g.question && (
+        <div className="rounded-xl border border-warn/40 bg-warn/10 p-4">
+          <div className="flex items-center gap-2 text-[13px] font-medium text-warn"><HelpCircle size={15} /> The planner needs you</div>
+          <p className="mt-1.5 text-[14px]">{g.question}</p>
+        </div>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <section>
+          <div className="label">Success criteria</div>
+          {g.success.length ? (
+            <ul className="space-y-1.5 text-[13px]">
+              {g.success.map((c, i) => <li key={i} className="flex gap-2"><Flag size={13} className="mt-0.5 shrink-0 text-faint" />{c}</li>)}
+            </ul>
+          ) : <p className="text-[13px] text-faint">None set. The planner infers criteria from the vision. <button onClick={onEdit} className="text-brand underline">Add some</button></p>}
+        </section>
+        <section>
+          <div className="label">Tasks toward this goal</div>
+          {g.tasks.length ? (
+            <ul className="space-y-1.5 text-[13px]">
+              {g.tasks.map((t) => {
+                const Icon = TASK_ICON[t.status];
+                return (
+                  <li key={t.id} className="flex items-start gap-2">
+                    <Icon size={14} className={clsx("mt-0.5 shrink-0", t.status === "done" ? "text-ok" : t.status === "active" ? "animate-pulse text-brand" : ["failed", "blocked"].includes(t.status) ? "text-bad" : "text-faint")} />
+                    <span className={clsx(t.status === "done" && "text-muted")}>{t.title}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : <p className="text-[13px] text-faint">None yet. They appear as the planner works.</p>}
+        </section>
+      </div>
+
+      <section>
+        <div className="label">{g.question ? "Answer" : "Add context or direction"}</div>
+        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void sendNote(); }}>
+          <input className="input" value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder={g.question ? "Your answer…" : "e.g. “Prioritise the public API over the admin UI”"} />
+          <button className="btn-outline shrink-0" disabled={!note.trim()}><MessageSquarePlus size={14} /> {g.question ? "Answer" : "Add"}</button>
+        </form>
+        <p className="mt-1 text-[12px] text-faint">Notes go into the journal, and the planner reads it every time it plans.</p>
+      </section>
+
+      <section>
+        <div className="label">Journal</div>
+        <ol className="relative space-y-3 border-l border-line pl-5">
+          {[...g.journal].reverse().map((e, i) => <JournalItem key={i} e={e} />)}
+        </ol>
+      </section>
+    </div>
+  );
+}
+
+function JournalItem({ e }: { e: JournalEntry }) {
+  const Icon = JOURNAL_ICON[e.kind] ?? Circle;
+  const tone = e.kind === "achieved" ? "text-ok" : e.kind === "question" ? "text-warn" : e.kind === "error" ? "text-bad"
+    : e.kind === "task" ? (e.status === "done" ? "text-ok" : "text-bad") : e.kind === "user" ? "text-info" : "text-brand";
+  return (
+    <li className="relative">
+      <span className={clsx("absolute -left-[29px] top-0 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-line bg-panel", tone)}>
+        <Icon size={10} />
+      </span>
+      <div className="flex items-center gap-2 text-[11px] text-faint">
+        <span className="font-medium uppercase tracking-wide">{e.kind}</span>
+        <span>{ago(e.at)}</span>
+        {typeof e.progress === "number" && <span className="font-mono">{e.progress}%</span>}
+      </div>
+      <p className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-muted">{e.text}</p>
+    </li>
+  );
+}
+
+function GoalForm({ open, goal, onClose, onSaved }: { open: boolean; goal: Goal | null; onClose: () => void; onSaved: (g: Goal) => void }) {
+  const { project } = useStore();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [verify, setVerify] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
+  const [success, setSuccess] = useState("");
+  const [start, setStart] = useState(true);
+  useEffect(() => {
+    if (!open) return;
+    setTitle(goal?.title ?? "");
+    setDescription(goal?.description ?? "");
+    setSuccess(goal?.success.join("\n") ?? "");
+    setStart(true);
+  }, [open, goal]);
+  const save = async () => {
+    const body = { title, description, success: success.split("\n").map((x) => x.trim()).filter(Boolean) };
+    const g = await act(() => (goal ? api.editGoal(goal.id, body) : api.addGoal({ ...body, project, paused: !start })), goal ? "Goal saved" : "Goal set");
+    if (g) {
+      onSaved(g);
+      onClose();
+    }
+  };
   return (
-    <form
-      className="card space-y-3 p-4"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        setBusy(true);
-        try {
-          await api.addGoal({ title, description: description || title, verify_command: verify });
-          onDone();
-        } catch (x) {
-          setErr((x as Error).message);
-        } finally {
-          setBusy(false);
-        }
-      }}
-    >
-      <div>
-        <label className="label">Goal</label>
-        <input className="input" autoFocus placeholder="Fix the flaky auth test" value={title} onChange={(e) => setTitle(e.target.value)} />
-      </div>
-      <div>
-        <label className="label">Details (optional)</label>
-        <textarea className="input min-h-[70px]" placeholder="Context, constraints, acceptance criteria…" value={description} onChange={(e) => setDescription(e.target.value)} />
-      </div>
-      <div>
-        <label className="label">Verify command (optional — must exit 0 when done)</label>
-        <input className="input font-mono" placeholder="pytest -q tests/test_auth.py" value={verify} onChange={(e) => setVerify(e.target.value)} />
-      </div>
-      {err && <div className="text-sm text-bad">{err}</div>}
-      <div className="flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={onDone}>Cancel</button>
-        <button className="btn-primary" disabled={!title.trim() || busy}>Queue goal</button>
-      </div>
-    </form>
+    <Modal open={open} onClose={onClose} title={goal ? "Edit goal" : "New long-horizon goal"} wide
+      footer={<><button className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn-primary" disabled={!title.trim()} onClick={save}>{goal ? "Save" : "Set goal"}</button></>}>
+      <Field label="Goal"><input className="input text-[15px]" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ship v1 of the billing API" /></Field>
+      <Field label="Vision" hint="What “done” looks like and why it matters. The planner rereads this every time it plans.">
+        <textarea className="input min-h-[100px]" value={description} onChange={(e) => setDescription(e.target.value)}
+          placeholder="Customers can create invoices and get paid through Stripe. Must be documented and covered by tests; no breaking changes to the existing /v0 endpoints." />
+      </Field>
+      <Field label="Success criteria" hint="One per line, concrete and checkable. The goal is only achieved when all are met.">
+        <textarea className="input min-h-[90px] font-mono text-[12.5px]" value={success} onChange={(e) => setSuccess(e.target.value)}
+          placeholder={"POST /v1/invoices creates an invoice\nStripe webhook marks invoices paid\nAPI docs in docs/api.md\npytest passes with >80% coverage on billing/"} />
+      </Field>
+      {!goal && (
+        <label className="flex items-center gap-2 text-[13px] text-muted">
+          <input type="checkbox" checked={start} onChange={(e) => setStart(e.target.checked)} className="accent-[rgb(var(--brand))]" />
+          Start working on it right away
+        </label>
+      )}
+    </Modal>
   );
 }

@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import { Brain, Plus, Search } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Empty, KindChip, PageHeader, ago } from "../components/ui";
+import { act, ConfirmButton, Empty, KindChip, PageHeader, ago } from "../components/ui";
 import { api, type MemoryItem, type Status } from "../lib/api";
 
 const KINDS = ["", "semantic", "procedural", "episodic"] as const;
@@ -100,7 +100,7 @@ export function MemoryView() {
           ) : (
             <ul className="space-y-2">
               {items.map((m) => (
-                <li key={m.id} className="card flex items-start gap-3 p-3.5">
+                <li key={m.id} className="card group flex items-start gap-3 p-3.5">
                   <KindChip kind={m.kind} />
                   <div className="min-w-0 flex-1">
                     <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed">{m.text}</p>
@@ -108,6 +108,11 @@ export function MemoryView() {
                       <span>{ago(m.created)}</span>
                       {m.tags.map((t) => <span key={t}>#{t}</span>)}
                     </div>
+                  </div>
+                  <div className="opacity-0 transition group-hover:opacity-100">
+                    <ConfirmButton label="Forget" onConfirm={async () => {
+                      if (await act(() => api.deleteMemory(m.id), "Forgotten")) setItems((xs) => xs.filter((x) => x.id !== m.id));
+                    }} />
                   </div>
                 </li>
               ))}

@@ -16,7 +16,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .agent import Event
-from .goals import Goal
+from .tasks import Task
 
 console = Console(highlight=False)
 
@@ -146,7 +146,7 @@ class TurnRenderer:
         return Group(*parts)
 
 
-def goals_table(goals: list[Goal], title: str = "goals") -> Table:
+def goals_table(goals: list[Task], title: str = "goals") -> Table:
     table = Table(title=title, title_style=f"bold {AMBER}", border_style="grey35", show_lines=False)
     for col, style in (("id", "cyan"), ("status", None), ("src", "dim"), ("tries", "dim"), ("title", None)):
         table.add_column(col, style=style, no_wrap=col != "title")
@@ -155,8 +155,26 @@ def goals_table(goals: list[Goal], title: str = "goals") -> Table:
     return table
 
 
+def long_goals_table(goals: list[Any], title: str = "goals") -> Table:
+    table = Table(title=title, title_style=f"bold {AMBER}", border_style="grey35")
+    for col, style in (("id", "cyan"), ("status", None), ("progress", "dim"), ("title", None)):
+        table.add_column(col, style=style, no_wrap=col != "title")
+    for g in goals:
+        table.add_row(g.id, g.status, f"{g.progress}%", g.title + (f"\n[dark_orange]? {g.question}[/]" if g.question else ""))
+    return table
+
+
+def ideas_table(ideas: list[Any], title: str = "idea inbox") -> Table:
+    table = Table(title=title, title_style=f"bold {AMBER}", border_style="grey35")
+    for col, style in (("id", "cyan"), ("size", "dim"), ("src", "dim"), ("title", None)):
+        table.add_column(col, style=style, no_wrap=col != "title")
+    for i in ideas:
+        table.add_row(i.id, i.size, i.source, i.title)
+    return table
+
+
 class Dashboard:
-    """Live daemon view: goal table + rolling activity log."""
+    """Live daemon view: task table + rolling activity log."""
 
     def __init__(self, runtime: Any):
         self.rt = runtime
@@ -164,7 +182,7 @@ class Dashboard:
         self.live = Live(self.render(), console=console, refresh_per_second=4, screen=False)
 
     def note(self, kind: str, message: str) -> None:
-        colors = {"goal": "cyan", "cycle": "magenta", "info": SLATE, "tool": "grey50"}
+        colors = {"task": "cyan", "goal": "bright_cyan", "cycle": "magenta", "info": SLATE, "tool": "grey50"}
         t = Text(f"{__import__('time').strftime('%H:%M:%S')} ", style="dim")
         t.append(message, style=colors.get(kind, "white"))
         self.log.append(t)
@@ -178,5 +196,5 @@ class Dashboard:
                           f"running {len(d.running)}/{self.rt.cfg.max_parallel_goals}", style=SLATE)
             if d.paused:
                 status.append(" · PAUSED", style="bold red")
-        return Group(goals_table(self.rt.goals.list()[-12:]), Panel(Group(*self.log) if self.log else Text("quiet", style="dim"),
+        return Group(goals_table(self.rt.tasks.list()[-12:], "tasks"), Panel(Group(*self.log) if self.log else Text("quiet", style="dim"),
                      title="activity", title_align="left", border_style="grey35"), status)

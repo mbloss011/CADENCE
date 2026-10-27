@@ -7,7 +7,7 @@ import type { Item } from "../lib/api";
 import { ToolCard } from "./ToolCard";
 import { Spinner } from "./ui";
 
-const Markdown = memo(function Markdown({ text }: { text: string }) {
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
     <div className="md">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>

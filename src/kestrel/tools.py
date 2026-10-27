@@ -39,7 +39,11 @@ class Tool:
 
 @dataclass
 class ToolRegistry:
+    """Tools by name. A fork layers its own tools over a live view of its parent, so tools that
+    MCP servers or plugins add later (from the UI) reach agents that already exist."""
+
     tools: dict[str, Tool] = field(default_factory=dict)
+    parent: "ToolRegistry | None" = None
 
     def register(self, tool: Tool) -> None:
         self.tools[tool.name] = tool
@@ -49,22 +53,28 @@ class ToolRegistry:
             del self.tools[name]
 
     def fork(self) -> "ToolRegistry":
-        """Shallow copy so an agent can add its own stateful tools without leaking them."""
-        return ToolRegistry(dict(self.tools))
+        """Child registry so an agent can add its own stateful tools without leaking them."""
+        return ToolRegistry(parent=self)
+
+    def all(self) -> dict[str, Tool]:
+        merged = self.parent.all() if self.parent else {}
+        merged.update(self.tools)
+        return merged
 
     def get(self, name: str) -> Tool | None:
-        return self.tools.get(name)
+        tool = self.tools.get(name)
+        return tool if tool is not None or self.parent is None else self.parent.get(name)
 
     def schemas(self) -> list[dict[str, Any]]:
-        return [t.schema() for t in self.tools.values()]
+        return [t.schema() for t in self.all().values()]
 
     def names(self) -> list[str]:
-        return sorted(self.tools)
+        return sorted(self.all())
 
     async def call(self, name: str, args: dict[str, Any], timeout: float) -> str:
-        tool = self.tools.get(name)
+        tool = self.get(name)
         if tool is None:
-            close = [n for n in self.tools if name.lower() in n.lower()][:5]
+            close = [n for n in self.all() if name.lower() in n.lower()][:5]
             hint = f" Did you mean: {', '.join(close)}?" if close else ""
             return f"ERROR: unknown tool '{name}'.{hint}"
         try:

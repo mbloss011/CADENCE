@@ -19,12 +19,14 @@ from .config import Config, load_config
 from .goals import Goal
 from .llm import LLMError, OpenAICompatLLM
 from .runtime import Runtime
-from .ui import AMBER, SLATE, Dashboard, TurnRenderer, banner, console, goals_table, pressure_bar
+from .tasks import Task
+from .ui import AMBER, Dashboard, TurnRenderer, banner, console, goals_table, ideas_table, long_goals_table, pressure_bar
 
 HELP = [
     ("/help", "show this help"),
-    ("/goal <text>", "run the text as a goal with verify → reflect → retry"),
-    ("/goals", "list goals            /approve <id>  approve a proposed goal"),
+    ("/task <text>", "run the text now as a task with verify → reflect → retry"),
+    ("/goal <text>", "set a long-horizon goal for the daemon's planner to work toward"),
+    ("/goals /tasks /ideas", "list goals, tasks, the idea inbox   /approve <id>  promote an idea / approve a task"),
     ("/tools /skills /mcp", "inspect tools, skills, MCP servers"),
     ("/todos", "show the agent's task list"),
     ("/context", "context usage         /compact  force small-model compaction"),
@@ -95,7 +97,7 @@ async def _command(rt: Runtime, agent: Agent, line: str) -> tuple[Agent, bool]:
         table.add_column("name", style="cyan")
         table.add_column("source", style="dim")
         table.add_column("description")
-        for t in agent.registry.tools.values():
+        for t in agent.registry.all().values():
             table.add_row(t.name, t.source, t.description[:80])
         console.print(table)
     elif cmd == "/skills":
@@ -145,20 +147,25 @@ async def _command(rt: Runtime, agent: Agent, line: str) -> tuple[Agent, bool]:
             console.print(f"[green]resumed {arg}[/green]")
         except (OSError, ValueError):
             console.print(f"[red]no such session: {arg}[/red]")
+    elif cmd == "/tasks":
+        console.print(goals_table(rt.tasks.list(), "tasks"))
     elif cmd == "/goals":
-        console.print(goals_table(rt.goals.list()))
+        console.print(long_goals_table(rt.goals.all()))
+    elif cmd == "/ideas":
+        console.print(ideas_table(rt.ideas.list("new")))
     elif cmd == "/approve":
-        goal = rt.goals.get(arg)
-        if goal and goal.status == "proposed":
-            rt.goals.update(goal, status="pending")
-            console.print(f"[green]approved {goal.id}[/green]")
-        else:
-            console.print("[red]no such proposed goal[/red]")
+        console.print(_approve(rt, arg))
     elif cmd == "/goal":
         if not arg:
-            console.print("[red]usage: /goal <description>[/red]")
+            console.print("[red]usage: /goal <what you want to achieve>[/red]")
         else:
-            await _run_goal_live(rt, Goal(title=arg[:80], description=arg))
+            g = rt.goals.add(Goal(title=arg[:160], description=arg, project=agent.project))
+            console.print(f"[green]goal {g.id} set[/green] — `kestrel web` or `kestrel daemon` plans and works toward it")
+    elif cmd == "/task":
+        if not arg:
+            console.print("[red]usage: /task <description>[/red]")
+        else:
+            await _run_goal_live(rt, Task(title=arg[:80], description=arg, project=agent.project))
     else:
         console.print(f"[red]unknown command {cmd}[/red] — /help")
     return agent, True
@@ -173,8 +180,8 @@ async def _force_compact(agent: Agent):
         agent.cfg.compact_trigger, agent.cfg.compact_target = saved
 
 
-async def _run_goal_live(rt: Runtime, goal: Goal) -> None:
-    rt.goals.add(goal)
+async def _run_goal_live(rt: Runtime, goal: Task) -> None:
+    rt.tasks.add(goal)
     renderer_holder: dict[str, TurnRenderer] = {}
 
     async def sink(_gid: str, ev) -> None:
@@ -200,7 +207,22 @@ async def _run_goal_live(rt: Runtime, goal: Goal) -> None:
     _print_goal_result(goal)
 
 
-def _print_goal_result(goal: Goal) -> None:
+def _approve(rt: Runtime, ref: str) -> str:
+    """Promote an idea to a task, or approve a proposed task."""
+    from .ideas import promote_to_task
+
+    idea = rt.ideas.get(ref)
+    if idea and idea.status == "new":
+        task = promote_to_task(rt.ideas, rt.tasks, idea)
+        return f"[green]idea {idea.id} → task {task.id}[/green]"
+    task = rt.tasks.get(ref)
+    if task and task.status == "proposed":
+        rt.tasks.update(task, status="pending")
+        return f"[green]approved {task.id}[/green]"
+    return "[red]no such new idea or proposed task[/red]"
+
+
+def _print_goal_result(goal: Task) -> None:
     color = {"done": "green", "failed": "red", "blocked": "dark_orange"}.get(goal.status, "yellow")
     console.print()
     console.print(Panel(Text(goal.result or "(no result)", style="white"), title=f"{goal.status} · {goal.attempts} attempt(s)", border_style=color))
@@ -210,7 +232,7 @@ def _print_goal_result(goal: Goal) -> None:
 
 # ─────────────────────────────────────────────────────────────── subcommands
 async def cmd_run(rt: Runtime, args: argparse.Namespace) -> int:
-    goal = Goal(title=args.goal[:80], description=args.goal, acceptance=args.accept or [], verify_command=args.verify or "")
+    goal = Task(title=args.goal[:80], description=args.goal, acceptance=args.accept or [], verify_command=args.verify or "")
     banner(rt.cfg.big.name, rt.cfg.small.name, str(rt.cfg.workspace))
     if args.image:
         # Images are understood up front and handed to the goal as text, so every retry can use them.
@@ -239,7 +261,7 @@ async def cmd_daemon(rt: Runtime, args: argparse.Namespace) -> int:
 
     async def notify(kind: str, message: str) -> None:
         dash.note(kind, message)
-        if kind == "goal" and message[:1] in "✔✖":
+        if kind in ("task", "goal") and message[:1] in "✔✖★?":
             for ch in channels:
                 await ch.broadcast(message)
 
@@ -291,25 +313,70 @@ async def _refresh(dash: Dashboard, daemon) -> None:
         await asyncio.sleep(1.0)
 
 
+async def cmd_tasks(rt: Runtime, args: argparse.Namespace) -> int:
+    if args.action == "add":
+        task = rt.tasks.add(Task(title=args.text[:80], description=args.text, acceptance=args.accept or [], verify_command=args.verify or ""))
+        console.print(f"[green]queued[/green] {task.id} — start `kestrel daemon` (or `kestrel web`) to run it")
+    elif args.action == "approve":
+        console.print(_approve(rt, args.text))
+    elif args.action == "show":
+        task = rt.tasks.get(args.text)
+        if not task:
+            console.print("[red]no such task[/red]")
+            return 1
+        _print_goal_result(task)
+    else:
+        console.print(goals_table(rt.tasks.list(), "tasks"))
+    return 0
+
+
 async def cmd_goals(rt: Runtime, args: argparse.Namespace) -> int:
     if args.action == "add":
-        goal = rt.goals.add(Goal(title=args.text[:80], description=args.text, acceptance=args.accept or [], verify_command=args.verify or ""))
-        console.print(f"[green]queued[/green] {goal.id} — start `kestrel daemon` to run it")
-    elif args.action == "approve":
-        goal = rt.goals.get(args.text)
-        if not goal or goal.status != "proposed":
-            console.print("[red]no such proposed goal[/red]")
+        if not args.text:
+            console.print("[red]usage: kestrel goals add \"what you want to achieve\" [--success CRITERION ...][/red]")
             return 1
-        rt.goals.update(goal, status="pending")
-        console.print(f"[green]approved[/green] {goal.id}")
-    elif args.action == "show":
-        goal = rt.goals.get(args.text)
-        if not goal:
+        g = rt.goals.add(Goal(title=args.text[:160], description=args.text, success=args.success or []))
+        rt.goals.log(g, "created", "goal set from the CLI")
+        console.print(f"[green]goal {g.id} set[/green] — the daemon plans tasks toward it")
+    elif args.action in ("pause", "resume", "archive"):
+        g = rt.goals.get(args.text)
+        if not g:
             console.print("[red]no such goal[/red]")
             return 1
-        _print_goal_result(goal)
+        rt.goals.update(g, status={"pause": "paused", "resume": "active", "archive": "archived"}[args.action], question="")
+        console.print(f"{g.id} → {g.status}")
+    elif args.action == "show":
+        g = rt.goals.get(args.text)
+        if not g:
+            console.print("[red]no such goal[/red]")
+            return 1
+        console.print(Panel(f"{g.description}\n\n[bold]Success:[/bold] " + "; ".join(g.success) + f"\n\n{g.assessment}",
+                            title=f"{g.title} · {g.status} · {g.progress}%", border_style=AMBER))
+        for e in g.journal[-15:]:
+            console.print(f"[dim]{e['kind']:>8}[/dim] {e['text'][:200]}")
+        console.print(goals_table(rt.tasks.list(goal=g.id), "tasks for this goal"))
     else:
-        console.print(goals_table(rt.goals.list()))
+        console.print(long_goals_table(rt.goals.all()))
+    return 0
+
+
+async def cmd_ideas(rt: Runtime, args: argparse.Namespace) -> int:
+    from .ideas import Idea
+
+    if args.action == "add":
+        i = rt.ideas.add(Idea(title=args.text[:160], description=args.text))
+        console.print(f"[green]idea {i.id} added[/green]")
+    elif args.action == "promote":
+        console.print(_approve(rt, args.text))
+    elif args.action == "dismiss":
+        i = rt.ideas.get(args.text)
+        if not i:
+            console.print("[red]no such idea[/red]")
+            return 1
+        rt.ideas.update(i, status="dismissed")
+        console.print(f"dismissed {i.id}")
+    else:
+        console.print(ideas_table(rt.ideas.list("new")))
     return 0
 
 
@@ -472,7 +539,7 @@ def _print_hooks(rt: Runtime) -> None:
 
 
 def _print_startup(rt: Runtime) -> None:
-    bits = [f"{len(rt.registry.tools)} tools", f"{len(rt.skills.skills)} skills", f"{len(rt.memory)} memories"]
+    bits = [f"{len(rt.scope().registry.all())} tools", f"{len(rt.skills.skills)} skills", f"{len(rt.memory)} memories"]
     if rt.plugins.loaded:
         bits.append(f"{len(rt.plugins.loaded)} plugins")
     if rt.hooks.count():
@@ -514,14 +581,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("chat", help="interactive session (default)")
     c.add_argument("--resume", metavar="ID")
-    r = sub.add_parser("run", help="run one goal with the reflection loop")
-    r.add_argument("goal")
-    r.add_argument("--verify", help="shell command that must exit 0 when the goal is met")
+    r = sub.add_parser("run", help="run one task now with the reflection loop")
+    r.add_argument("goal", metavar="task")
+    r.add_argument("--verify", help="shell command that must exit 0 when the task is done")
     r.add_argument("--accept", action="append", help="acceptance criterion (repeatable)")
-    r.add_argument("--image", action="append", type=Path, help="image to include with the goal (repeatable)")
+    r.add_argument("--image", action="append", type=Path, help="image to include with the task (repeatable)")
     d = sub.add_parser("daemon", help="heartbeat + event-driven autonomous mode (+ Telegram/WhatsApp channels)")
     d.add_argument("--no-channels", action="store_true", help="do not start configured messaging channels")
-    w = sub.add_parser("web", help="web GUI: chat, steer, goals, memory, system (+ daemon and channels)")
+    w = sub.add_parser("web", help="web GUI: projects, chat, canvas, browser, files, goals, settings (+ daemon, channels)")
     w.add_argument("--host", default="127.0.0.1")
     w.add_argument("--port", type=int, default=8765)
     w.add_argument("--token", help="require this token (auto-generated when binding beyond localhost)")
@@ -533,11 +600,18 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("text", nargs="?", default="")
     m.add_argument("-k", type=int, default=8)
     m.add_argument("--kind", choices=["episodic", "semantic", "procedural"], default="semantic")
-    g = sub.add_parser("goals", help="manage goals")
-    g.add_argument("action", choices=["list", "add", "approve", "show"], nargs="?", default="list")
+    g = sub.add_parser("goals", help="long-horizon goals the planner works toward")
+    g.add_argument("action", choices=["list", "add", "show", "pause", "resume", "archive"], nargs="?", default="list")
     g.add_argument("text", nargs="?", default="")
-    g.add_argument("--verify")
-    g.add_argument("--accept", action="append")
+    g.add_argument("--success", action="append", help="success criterion (repeatable)")
+    t = sub.add_parser("tasks", help="concrete tasks (run by the daemon)")
+    t.add_argument("action", choices=["list", "add", "approve", "show"], nargs="?", default="list")
+    t.add_argument("text", nargs="?", default="")
+    t.add_argument("--verify")
+    t.add_argument("--accept", action="append")
+    ide = sub.add_parser("ideas", help="the idea inbox")
+    ide.add_argument("action", choices=["list", "add", "promote", "dismiss"], nargs="?", default="list")
+    ide.add_argument("text", nargs="?", default="")
     sub.add_parser("doctor", help="check model endpoints, MCP servers, skills")
     i = sub.add_parser("inspect", help="list skills, MCP servers or tools")
     i.add_argument("what", choices=["skills", "mcp", "tools", "plugins", "hooks"])
@@ -549,8 +623,8 @@ async def _amain(args: argparse.Namespace) -> int:
     rt = await Runtime(cfg).start()
     try:
         cmd = args.command or "chat"
-        handlers = {"run": cmd_run, "daemon": cmd_daemon, "goals": cmd_goals, "doctor": cmd_doctor, "inspect": cmd_inspect,
-                    "memory": cmd_memory, "web": cmd_web}
+        handlers = {"run": cmd_run, "daemon": cmd_daemon, "goals": cmd_goals, "tasks": cmd_tasks, "ideas": cmd_ideas,
+                    "doctor": cmd_doctor, "inspect": cmd_inspect, "memory": cmd_memory, "web": cmd_web}
         if cmd == "chat":
             return await chat(rt, getattr(args, "resume", None))
         return await handlers[cmd](rt, args)

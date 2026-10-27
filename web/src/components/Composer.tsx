@@ -2,6 +2,7 @@ import clsx from "clsx";
 import { ArrowUp, CornerDownRight, ImagePlus, Loader2, Square, X } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { api } from "../lib/api";
+import { useStore } from "../lib/store";
 import { Kbd } from "./ui";
 
 type Upload = { id: string; preview: string; name: string } | { pending: true; preview: string; name: string };
@@ -23,6 +24,20 @@ export function Composer({
   const [drag, setDrag] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const store = useStore();
+
+  useEffect(() => {
+    if (store.draft === null) return;
+    setText(store.draft);
+    store.setDraft(null);
+    requestAnimationFrame(() => {
+      const el = ref.current;
+      if (el) {
+        el.focus();
+        el.selectionStart = el.selectionEnd = el.value.length;
+      }
+    });
+  }, [store.draft]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const el = ref.current;

@@ -1,9 +1,11 @@
 """Heartbeat + event-driven daemon.
 
 * Event-driven: `submit()` / `wake()` interrupt the sleep immediately.
-* Heartbeat: every `24h / reflection_cycles` it runs an idea cycle (propose goals) and an
-  improvement cycle (consolidate lessons) when nothing else is queued.
-* Concurrency: up to `max_parallel_goals` goals run as independent asyncio tasks.
+* Tasks: up to `max_parallel_goals` pending tasks run as independent asyncio tasks.
+* Goals: every active long-horizon goal with nothing queued is handed to the planner, which assesses
+  progress and queues its next tasks. A finished task triggers an immediate re-plan of its goal.
+* Heartbeat: every `24h / reflection_cycles`, when idle, it runs an idea cycle (fills the idea inbox)
+  and an improvement cycle (consolidates lessons).
 """
 
 from __future__ import annotations
@@ -12,26 +14,35 @@ import asyncio
 import datetime as dt
 import json
 import logging
-from typing import Awaitable, Callable
+import time
+from typing import Any, Awaitable, Callable
 
 from .agent import Event
 from .config import Config
-from .goals import Goal, GoalRunner, GoalStore
+from .goals import Goal, Planner
+from .tasks import Task, TaskRunner, TaskStore
 
 log = logging.getLogger(__name__)
 Notify = Callable[[str, str], Awaitable[None]]  # (kind, message)
+REPLAN_COOLDOWN = 600.0  # seconds before re-planning a goal whose last plan queued nothing
 
 
 class Daemon:
-    def __init__(self, cfg: Config, runner: GoalRunner, store: GoalStore, notify: Notify | None = None,
-                 event_sink: Callable[[str, Event], Awaitable[None]] | None = None):
+    def __init__(self, cfg: Config, runner: TaskRunner, store: TaskStore, notify: Notify | None = None,
+                 event_sink: Callable[[str, Event], Awaitable[None]] | None = None, *,
+                 planner: Planner | None = None, workspace_for: Callable[[str], Any] | None = None,
+                 ideate: Callable[[], Awaitable[int]] | None = None):
         self.cfg, self.runner, self.store = cfg, runner, store
         self.notify = notify
         self.event_sink = event_sink
+        self.planner = planner
+        self.workspace_for = workspace_for or (lambda _pid: cfg.workspace)
+        self.ideate = ideate
         self.paused = False
         self._wake = asyncio.Event()
         self._stop = asyncio.Event()
-        self._tasks: dict[str, asyncio.Task[Goal]] = {}
+        self._tasks: dict[str, asyncio.Task[Task]] = {}
+        self._planning: dict[str, asyncio.Task[None]] = {}
         self._state_path = cfg.state_dir / "daemon.json"
         self.last_tick = ""
         self.cycles_today = 0
@@ -65,11 +76,21 @@ class Daemon:
     def running(self) -> list[str]:
         return list(self._tasks)
 
+    @property
+    def planning(self) -> list[str]:
+        return list(self._planning)
+
     # ------------------------------------------------------------------- API
-    def submit(self, goal: Goal) -> Goal:
-        self.store.add(goal)
+    def submit(self, task: Task) -> Task:
+        self.store.add(task)
         self._wake.set()
-        return goal
+        return task
+
+    def plan_now(self, goal: Goal) -> None:
+        """Ask for a planning pass on the next tick, ignoring the cooldown."""
+        if self.planner:
+            self.planner.goals.update(goal, last_planned=0.0)
+        self._wake.set()
 
     def wake(self) -> None:
         self._wake.set()
@@ -81,7 +102,7 @@ class Daemon:
     async def run_forever(self) -> None:
         recovered = self.store.recover_interrupted()
         if recovered:
-            await self._say("info", f"re-queued {recovered} goal(s) interrupted by a previous shutdown")
+            await self._say("info", f"re-queued {recovered} task(s) interrupted by a previous shutdown")
         next_cycle = 0.0
         loop = asyncio.get_running_loop()
         while not self._stop.is_set():
@@ -89,7 +110,9 @@ class Daemon:
             self._reap()
             if not self.paused:
                 self._launch_ready()
-                if not self._tasks and loop.time() >= next_cycle and self.cycles_today < self.cfg.reflection_cycles:
+                self._advance_goals()
+                idle = not self._tasks and not self._planning
+                if idle and loop.time() >= next_cycle and self.cycles_today < self.cfg.reflection_cycles:
                     await self._cycle()
                     next_cycle = loop.time() + self.interval
             self.last_tick = dt.datetime.now().strftime("%H:%M:%S")
@@ -98,39 +121,76 @@ class Daemon:
             except asyncio.TimeoutError:
                 pass
             self._wake.clear()
-        for t in self._tasks.values():
+        pending = [*self._tasks.values(), *self._planning.values()]
+        for t in pending:
             t.cancel()
-        await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+        await asyncio.gather(*pending, return_exceptions=True)
 
     # -------------------------------------------------------------- internals
     def _launch_ready(self) -> None:
         free = self.cfg.max_parallel_goals - len(self._tasks)
         if free <= 0:
             return
-        for goal in self.store.list("pending")[:free]:
-            if goal.id not in self._tasks:
-                self._tasks[goal.id] = asyncio.create_task(self._run_goal(goal), name=f"goal-{goal.id}")
+        paused = {g.id for g in self.planner.goals.all() if g.status != "active"} if self.planner else set()
+        for task in [t for t in self.store.list("pending") if t.goal not in paused][:free]:
+            if task.id not in self._tasks:
+                self._tasks[task.id] = asyncio.create_task(self._run_task(task), name=f"task-{task.id}")
 
-    async def _run_goal(self, goal: Goal) -> Goal:
-        await self._say("goal", f"▶ {goal.title}")
-        result = await self.runner.run(goal, self.event_sink)
-        await self._say("goal", f"{'✔' if result.status == 'done' else '✖'} {goal.title} → {result.status}")
+    async def _run_task(self, task: Task) -> Task:
+        await self._say("task", f"▶ {task.title}")
+        result = await self.runner.run(task, self.event_sink)
+        await self._say("task", f"{'✔' if result.status == 'done' else '✖'} {task.title} → {result.status}")
+        if self.planner and result.status not in ("pending", "active"):
+            goal = self.planner.record(result)
+            if goal and goal.status == "active":
+                self.planner.goals.update(goal, last_planned=0.0)  # re-plan right away with the new evidence
         self._wake.set()
         return result
 
+    def _advance_goals(self) -> None:
+        """Plan every active goal that has nothing queued (one planning call at a time: it is a big-model call)."""
+        if not self.planner or self._planning:
+            return
+        now = time.time()
+        for goal in self.planner.goals.list("active"):
+            if self.planner.open_tasks(goal) or now - goal.last_planned < REPLAN_COOLDOWN:
+                continue
+            if goal.last_planned and self.planner.budget_left(goal) == 0:
+                continue
+            self._planning[goal.id] = asyncio.create_task(self._plan(goal), name=f"plan-{goal.id}")
+            return
+
+    async def _plan(self, goal: Goal) -> None:
+        assert self.planner is not None
+        try:
+            added = await self.planner.plan(goal, self.workspace_for(goal.project))
+            if goal.status == "achieved":
+                await self._say("goal", f"★ goal achieved: {goal.title}")
+                await self.runner.hooks.emit("goal_achieved", {"goal_id": goal.id, "title": goal.title, "assessment": goal.assessment})
+            elif goal.status == "paused" and goal.question:
+                await self._say("goal", f"? {goal.title}: {goal.question}")
+            elif added:
+                await self._say("goal", f"◆ {goal.title} ({goal.progress}%): queued {', '.join(t.title for t in added)}")
+        except Exception as exc:  # noqa: BLE001 — a planning bug must not stop the daemon
+            log.exception("planning %s failed", goal.id)
+            self.planner.goals.log(goal, "error", f"planning crashed: {exc}")
+        finally:
+            self._planning.pop(goal.id, None)
+            self._wake.set()
+
     def _reap(self) -> None:
-        for gid, task in list(self._tasks.items()):
+        for tid, task in list(self._tasks.items()):
             if task.done():
-                del self._tasks[gid]
+                del self._tasks[tid]
                 if not task.cancelled() and task.exception():
-                    log.error("goal %s crashed: %s", gid, task.exception())
+                    log.error("task %s crashed: %s", tid, task.exception())
 
     async def _cycle(self) -> None:
         self.cycles_today += 1
         self._save_state()
-        added = await self.runner.propose(3)
+        added = await self.ideate() if self.ideate else 0
         learned = await self.runner.consolidate_lessons()
-        await self._say("cycle", f"cycle {self.cycles_today}/{self.cfg.reflection_cycles}: {len(added)} idea(s), {learned} lesson(s) consolidated")
+        await self._say("cycle", f"cycle {self.cycles_today}/{self.cfg.reflection_cycles}: {added} idea(s), {learned} lesson(s) consolidated")
         if added and self.cfg.auto_approve_ideas:
             self._wake.set()
 

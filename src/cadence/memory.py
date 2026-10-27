@@ -139,7 +139,7 @@ class QdrantIndex:
 
     @staticmethod
     def _point_id(mid: str) -> str:
-        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"kestrel:{mid}"))
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"cadence:{mid}"))
 
     async def _request(self, method: str, path: str, **kw: Any) -> dict[str, Any]:
         try:
@@ -357,7 +357,7 @@ class MemoryStore:
 
 
 def build_memory(cfg: Any) -> MemoryStore:
-    """Construct the store described by `cfg.memory` (a `kestrel.config.Config`)."""
+    """Construct the store described by `cfg.memory` (a `cadence.config.Config`)."""
     from .llm import OpenAICompatEmbedder
 
     mc = cfg.memory

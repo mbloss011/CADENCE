@@ -4,12 +4,12 @@ import json
 
 from conftest import tool_call
 
-from kestrel.agent import Agent
-from kestrel.tasks import Task, TaskRunner, TaskStore, extract_json
-from kestrel.llm import Completion
-from kestrel.memory import MemoryStore
-from kestrel.skills import SkillRegistry
-from kestrel.tools import ToolRegistry, Workspace, builtin_tools
+from cadence.agent import Agent
+from cadence.tasks import Task, TaskRunner, TaskStore, extract_json
+from cadence.llm import Completion
+from cadence.memory import MemoryStore
+from cadence.skills import SkillRegistry
+from cadence.tools import ToolRegistry, Workspace, builtin_tools
 
 
 def make_runner(cfg, router):
@@ -76,7 +76,7 @@ async def test_unparseable_reflection_falls_back_to_verification(cfg, make_route
 
 
 async def test_ideation_fills_the_inbox_without_running_anything(cfg, make_router):
-    from kestrel.ideas import IdeaStore, ideate, promote_to_task
+    from cadence.ideas import IdeaStore, ideate, promote_to_task
 
     raw = json.dumps([
         {"title": "Add unit tests for parser", "description": "d", "acceptance": ["tests pass"], "verify_command": "pytest -q"},

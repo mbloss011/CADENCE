@@ -1,8 +1,8 @@
 """Routes for settings, model discovery and extensions (skills, plugins, MCP servers, hooks).
 
-Every change is written to ~/.kestrel/settings.json (same keys as config.yaml) and applied to the
+Every change is written to ~/.cadence/settings.json (same keys as config.yaml) and applied to the
 running process, so the UI and the next restart always agree. Skill and plugin *files* live in
-~/.kestrel/skills and ~/.kestrel/plugins (or the project's .kestrel/ directory for project scope).
+~/.cadence/skills and ~/.cadence/plugins (or the project's .cadence/ directory for project scope).
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 MAX_SKILL_BYTES = 256 * 1024
 
-PLUGIN_TEMPLATE = '''"""{name}: a Kestrel plugin. Edit and save; it reloads immediately."""
+PLUGIN_TEMPLATE = '''"""{name}: a Cadence plugin. Edit and save; it reloads immediately."""
 
 
 def register(api):
@@ -40,7 +40,7 @@ def register(api):
         return f"hello, {{args.get('who', 'world')}} from {name}"
 
     # Hooks: return a string to add context, or HookResult(block=True, reason=...) to refuse.
-    # from kestrel.plugins import HookResult
+    # from cadence.plugins import HookResult
     # @api.on("pre_tool", matcher="bash")
     # def guard(payload):
     #     if "rm -rf /" in payload["arguments"].get("command", ""):
@@ -172,7 +172,7 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
     def scope_skills(req: web.Request) -> tuple[SkillRegistry, Path]:
         sc = rt.scope(req.query.get("project", ""))
         sc.skills.scan()
-        return sc.skills, sc.project.root / ".kestrel" / "skills"
+        return sc.skills, sc.project.root / ".cadence" / "skills"
 
     def writable(path: Path, project_dir: Path) -> bool:
         root = path.resolve()
@@ -214,7 +214,7 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
         description = str(data.get("description", "")).strip().replace("\n", " ")
         if not description:
             raise web.HTTPBadRequest(text="a description is required: it is how the agent decides to use the skill")
-        base = user_skill_dir() if data.get("scope", "user") == "user" else rt.scope(str(data.get("project", ""))).project.root / ".kestrel" / "skills"
+        base = user_skill_dir() if data.get("scope", "user") == "user" else rt.scope(str(data.get("project", ""))).project.root / ".cadence" / "skills"
         target = base / name / "SKILL.md"
         if target.exists():
             raise web.HTTPConflict(text=f"{target} already exists")
@@ -275,7 +275,7 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
         """From a local folder containing SKILL.md, or an http(s) URL of a raw SKILL.md."""
         data = await body(req)
         src = str(data.get("source", "")).strip()
-        base = user_skill_dir() if data.get("scope", "user") == "user" else rt.scope(str(data.get("project", ""))).project.root / ".kestrel" / "skills"
+        base = user_skill_dir() if data.get("scope", "user") == "user" else rt.scope(str(data.get("project", ""))).project.root / ".cadence" / "skills"
         tmp = base / f".import-{os.getpid()}"
         shutil.rmtree(tmp, ignore_errors=True)
         try:

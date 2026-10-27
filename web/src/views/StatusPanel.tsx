@@ -11,12 +11,12 @@ export function StatusPanel({ status, refresh }: { status: Status | null; refres
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between text-[13px] text-muted">
-        <span>Cadence {s.version} · <span className="font-mono">{s.workspace}</span></span>
+        <span>CADENCE {s.version} · <span className="font-mono">{s.workspace}</span></span>
         <button className="btn-outline" onClick={refresh}><RefreshCw size={14} /> Refresh</button>
       </div>
       {s.restart_required.length > 0 && (
         <div className="rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[13px] text-warn">
-          Restart Cadence to apply: {s.restart_required.join(", ")}. Saved settings are kept.
+          Restart CADENCE to apply: {s.restart_required.join(", ")}. Saved settings are kept.
         </div>
       )}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -29,7 +29,7 @@ export function StatusPanel({ status, refresh }: { status: Status | null; refres
         <Health icon={<Webhook size={16} />} title="Channels" ok={s.channels.length > 0} warn={s.channels.length === 0} value={s.channels.join(", ") || "none"} detail="Telegram / WhatsApp via config.yaml" />
         <Health icon={<Box size={16} />} title="Extensions" ok={!s.plugin_errors.length} value={`${s.skills.length} skills · ${s.plugins.length} plugins · ${s.mcp.length} MCP`} detail={s.plugin_errors[0] || `${s.hooks.length} hooks`} />
         <Health icon={<Puzzle size={16} />} title="Daemon" ok={!!s.daemon && !s.daemon.paused} warn={!!s.daemon?.paused} value={s.daemon ? (s.daemon.paused ? "paused" : "running") : "off"}
-          detail={s.daemon ? `${s.daemon.running.length} task(s) · ${s.daemon.planning.length ? "planning" : "idle planner"} · ${s.daemon.cycles_today}/${s.daemon.cycles_per_day} idea cycles` : "start `kestrel web` without --no-daemon"} />
+          detail={s.daemon ? `${s.daemon.running.length} task(s) · ${s.daemon.planning.length ? "planning" : "idle planner"} · ${s.daemon.cycles_today}/${s.daemon.cycles_per_day} idea cycles` : "start `cadence web` without --no-daemon"} />
       </div>
 
       <Section title="Tools in this project" count={s.tools.length}>

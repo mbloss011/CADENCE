@@ -4,11 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
-    <title>Cadence</title>
+    <title>CADENCE</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
     <script>
       try {
-        var t = localStorage.getItem("kestrel.theme");
+        // one-time carry-over of this browser's preferences from the Kestrel name
+        ["theme", "project", "dock", "dockw"].forEach(function (k) {
+          var old = localStorage.getItem("kestrel." + k);
+          if (old !== null && localStorage.getItem("cadence." + k) === null) localStorage.setItem("cadence." + k, old);
+          localStorage.removeItem("kestrel." + k);
+        });
+        var t = localStorage.getItem("cadence.theme");
         document.documentElement.dataset.theme = t || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
       } catch (e) {
         document.documentElement.dataset.theme = "dark";

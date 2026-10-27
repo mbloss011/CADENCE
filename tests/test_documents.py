@@ -9,8 +9,8 @@ import zipfile
 
 import pytest
 
-from kestrel.documents import extract, parse_pages, to_viewable
-from kestrel.tools import Workspace, builtin_tools
+from cadence.documents import extract, parse_pages, to_viewable
+from cadence.tools import Workspace, builtin_tools
 
 DOCX_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
@@ -83,7 +83,7 @@ def files(tmp_path):
         z.writestr("README.md", "# bundle")
     from PIL import Image
     Image.new("RGB", (40, 20), "red").save(d / "logo.bmp")
-    (d / "blob.bin").write_bytes(b"\x00\x01KESTRELMAGIC\x02" + bytes(range(256)))
+    (d / "blob.bin").write_bytes(b"\x00\x01CADENCEMAGIC\x02" + bytes(range(256)))
     return d
 
 
@@ -130,7 +130,7 @@ async def test_containers_images_and_binaries(files):
     img = await extract(files / "logo.bmp")
     assert img.kind == "image" and img.meta["width"] == 40
     blob = await extract(files / "blob.bin")
-    assert blob.kind == "binary" and "KESTRELMAGIC" in blob.text
+    assert blob.kind == "binary" and "CADENCEMAGIC" in blob.text
     page = await extract(files / "page.html")
     assert "evil()" not in page.meta["readable"] and "Hello & welcome" in page.meta["readable"]
 
@@ -140,7 +140,7 @@ async def test_read_file_tool_reads_anything_and_view_image_converts(files):
 
     class FakeVision:
         async def complete(self, messages, **kw):
-            from kestrel.llm import Completion
+            from cadence.llm import Completion
             seen.append(messages[-1]["content"][1]["image_url"]["url"][:22])
             return Completion(content="a red rectangle")
 

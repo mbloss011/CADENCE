@@ -25,7 +25,7 @@ const DOCK: { id: DockTab; label: string; icon: typeof Globe }[] = [
 function useDockWidth() {
   const [w, setW] = useState(() => {
     try {
-      return Number(localStorage.getItem("kestrel.dockw")) || 520;
+      return Number(localStorage.getItem("cadence.dockw")) || 520;
     } catch {
       return 520;
     }
@@ -40,7 +40,7 @@ function useDockWidth() {
       window.removeEventListener("pointerup", up);
       setW((cur) => {
         try {
-          localStorage.setItem("kestrel.dockw", String(Math.round(cur)));
+          localStorage.setItem("cadence.dockw", String(Math.round(cur)));
         } catch {
           /* storage unavailable */
         }
@@ -95,7 +95,7 @@ export function ChatView({ sid, status, onNew }: { sid: string | null; status: S
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-5">
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">{sid ? title : "Cadence"}</div>
+            <div className="truncate text-sm font-medium">{sid ? title : "CADENCE"}</div>
             {status && (
               <div className="flex items-center gap-1.5 truncate text-[11px] text-faint">
                 <span className="font-mono">{status.models.big.name}</span>
@@ -229,10 +229,10 @@ function Welcome({ status, onPick }: { status: Status | null; onPick: (t: string
   return (
     <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center px-6 py-12">
       <Logo className="mb-3 h-[140px] w-[140px]" />
-      <div className="wordmark mb-4 text-3xl font-bold tracking-tight">Cadence</div>
+      <div className="wordmark mb-4 text-3xl font-bold tracking-[0.18em]">CADENCE</div>
       <h2 className="text-xl font-semibold tracking-tight">What should we build?</h2>
       <p className="mt-2 text-center text-sm text-muted">
-        Cadence reads, edits and runs code in <span className="font-mono text-ink">{status?.workspace.replace(/^\/home\/[^/]+/, "~") ?? "your project"}</span>.
+        CADENCE reads, edits and runs code in <span className="font-mono text-ink">{status?.workspace.replace(/^\/home\/[^/]+/, "~") ?? "your project"}</span>.
         Steer it mid-task, interrupt with Esc, drop in a screenshot, or work together on the canvas and in the browser.
       </p>
       <div className="mt-8 grid w-full gap-2 sm:grid-cols-2">
@@ -248,5 +248,5 @@ function Welcome({ status, onPick }: { status: Status | null; onPick: (t: string
 }
 
 export function Logo({ className }: { className?: string }) {
-  return <img src="/cadence-mark.png" alt="Cadence" className={clsx("brand-glow object-contain", className)} draggable={false} />;
+  return <img src="/cadence-mark.png" alt="CADENCE" className={clsx("brand-glow object-contain", className)} draggable={false} />;
 }

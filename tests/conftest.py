@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from kestrel.config import Config
-from kestrel.llm import Completion, ModelRouter, StreamDelta, ToolCall
+from cadence.config import Config
+from cadence.llm import Completion, ModelRouter, StreamDelta, ToolCall
 
 
 class ScriptedLLM:
@@ -34,6 +34,13 @@ class ScriptedLLM:
 
 def tool_call(_tool: str, /, **args: Any) -> Completion:
     return Completion(tool_calls=[ToolCall(id=f"c_{_tool}", name=_tool, arguments=json.dumps(args))])
+
+
+@pytest.fixture(autouse=True)
+def _private_home(tmp_path_factory, monkeypatch):
+    """Nothing a test does may write to the real ~/.cadence (caches included)."""
+    import cadence.config
+    monkeypatch.setattr(cadence.config, "HOME_DIR", tmp_path_factory.mktemp("home"))
 
 
 @pytest.fixture

@@ -20,7 +20,7 @@ export function SettingsView({ status, refreshStatus }: { status: Status | null;
     if (s) {
       setSettings(s);
       refreshStatus();
-      toast(s.restart_required.length ? `${ok}. Restart Cadence to apply: ${s.restart_required.join(", ")}` : `${ok} and applied`, s.restart_required.length ? "info" : "ok");
+      toast(s.restart_required.length ? `${ok}. Restart CADENCE to apply: ${s.restart_required.join(", ")}` : `${ok} and applied`, s.restart_required.length ? "info" : "ok");
     }
     return s;
   };
@@ -305,7 +305,7 @@ function SafetyTab({ s, patch }: { s: Settings; patch: Patch }) {
       </Card>
       <Card title="Shared browser" icon={<Globe size={16} />} actions={<SaveBar dirty={brDirty} onReset={resetBr} onSave={() => patch({ browser: br })} />}>
         <ToggleRow label="Browser tools" hint="Lets the agent open and drive the shared browser (it runs outside the sandbox, with network access)" value={br.enabled} onChange={(v) => setBr({ enabled: v })} />
-        <Field label="Chrome / Chromium executable" hint="Empty finds google-chrome or chromium on PATH. Profiles (logins) live in ~/.kestrel/state/browser/<project>.">
+        <Field label="Chrome / Chromium executable" hint="Empty finds google-chrome or chromium on PATH. Profiles (logins) live in ~/.cadence/state/browser/<project>.">
           <input className="input font-mono" value={br.executable} onChange={(e) => setBr({ executable: e.target.value })} placeholder="/usr/bin/google-chrome" />
         </Field>
       </Card>

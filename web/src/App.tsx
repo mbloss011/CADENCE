@@ -21,7 +21,7 @@ function parseHash(): { view: View; sid: string | null; sub: string | null } {
 
 function initialTheme(): "dark" | "light" {
   try {
-    const saved = localStorage.getItem("kestrel.theme");
+    const saved = localStorage.getItem("cadence.theme");
     if (saved === "dark" || saved === "light") return saved;
   } catch {
     /* storage unavailable */
@@ -52,7 +52,7 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try {
-      localStorage.setItem("kestrel.theme", theme);
+      localStorage.setItem("cadence.theme", theme);
     } catch {
       /* storage unavailable */
     }

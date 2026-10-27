@@ -1,7 +1,7 @@
-"""Python plugins: add tools and hooks without touching Kestrel's source.
+"""Python plugins: add tools and hooks without touching Cadence's source.
 
 A plugin is `<plugin_dir>/<name>.py` or `<plugin_dir>/<name>/__init__.py` (or an installed package
-exposing a `kestrel.plugins` entry point) with a `register(api)` function:
+exposing a `cadence.plugins` entry point) with a `register(api)` function:
 
     def register(api):
         @api.tool("word_count", "Count words in a workspace file.",
@@ -104,7 +104,7 @@ class PluginManager:
                 elif (entry / "__init__.py").is_file():
                     found.append((entry.name, str(entry), lambda p=entry: _import_file(p.name, p / "__init__.py")))
         try:
-            for ep in entry_points(group="kestrel.plugins"):
+            for ep in [*entry_points(group="cadence.plugins"), *entry_points(group="kestrel.plugins")]:  # + pre-rename group
                 found.append((ep.name, f"entry point {ep.value}", ep.load))
         except Exception as exc:  # noqa: BLE001
             self.errors.append(f"entry points: {exc}")
@@ -141,7 +141,7 @@ class PluginManager:
         registry.unregister_source(f"plugin:{name}")
         hooks.remove_owner(name)
         self.loaded.pop(name, None)
-        sys.modules.pop(f"kestrel_plugin_{name}", None)
+        sys.modules.pop(f"cadence_plugin_{name}", None)
 
     def reload(self, name: str) -> bool:
         """Re-import a plugin from disk (after an edit). False if it is unknown, disabled or fails."""
@@ -170,7 +170,7 @@ class PluginManager:
 
 
 def _import_file(name: str, path: Path) -> Any:
-    mod_name = f"kestrel_plugin_{name}"
+    mod_name = f"cadence_plugin_{name}"
     spec = importlib.util.spec_from_file_location(mod_name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot import {path}")

@@ -40,7 +40,7 @@ export function TasksView({ status, refreshStatus, onOpenSession }: { status: St
             Concrete, verifiable units of work: act → verify → reflect → retry. Daemon {d.paused ? <b className="text-warn">paused</b> : "running"} ·{" "}
             {d.running.length}/{d.max_parallel} running
           </span>
-        ) : "The daemon is off, so tasks wait until `kestrel web` runs with it."}
+        ) : "The daemon is off, so tasks wait until `cadence web` runs with it."}
         actions={<>
           {d && (
             <button className="btn-outline" onClick={() => api.daemon(d.paused ? "resume" : "pause").then(refreshStatus)}>

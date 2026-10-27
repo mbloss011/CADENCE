@@ -1,4 +1,4 @@
-"""Cadence command-line interface (Rich + prompt_toolkit). Installed as both `cadence` and `kestrel`."""
+"""Cadence command-line interface (Rich + prompt_toolkit). Installed as both `cadence` and `cadence`."""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ async def chat(rt: Runtime, resume: str | None) -> int:
             continue
         await _run_turn(rt, agent, line)
     agent.save_session()
-    console.print(f"[dim]session {agent.session_id} saved · resume with: kestrel chat --resume {agent.session_id}[/dim]")
+    console.print(f"[dim]session {agent.session_id} saved · resume with: cadence chat --resume {agent.session_id}[/dim]")
     return 0
 
 
@@ -160,7 +160,7 @@ async def _command(rt: Runtime, agent: Agent, line: str) -> tuple[Agent, bool]:
             console.print("[red]usage: /goal <what you want to achieve>[/red]")
         else:
             g = rt.goals.add(Goal(title=arg[:160], description=arg, project=agent.project))
-            console.print(f"[green]goal {g.id} set[/green] — `kestrel web` or `kestrel daemon` plans and works toward it")
+            console.print(f"[green]goal {g.id} set[/green] — `cadence web` or `cadence daemon` plans and works toward it")
     elif cmd == "/task":
         if not arg:
             console.print("[red]usage: /task <description>[/red]")
@@ -316,7 +316,7 @@ async def _refresh(dash: Dashboard, daemon) -> None:
 async def cmd_tasks(rt: Runtime, args: argparse.Namespace) -> int:
     if args.action == "add":
         task = rt.tasks.add(Task(title=args.text[:80], description=args.text, acceptance=args.accept or [], verify_command=args.verify or ""))
-        console.print(f"[green]queued[/green] {task.id} — start `kestrel daemon` (or `kestrel web`) to run it")
+        console.print(f"[green]queued[/green] {task.id} — start `cadence daemon` (or `cadence web`) to run it")
     elif args.action == "approve":
         console.print(_approve(rt, args.text))
     elif args.action == "show":
@@ -333,7 +333,7 @@ async def cmd_tasks(rt: Runtime, args: argparse.Namespace) -> int:
 async def cmd_goals(rt: Runtime, args: argparse.Namespace) -> int:
     if args.action == "add":
         if not args.text:
-            console.print("[red]usage: kestrel goals add \"what you want to achieve\" [--success CRITERION ...][/red]")
+            console.print("[red]usage: cadence goals add \"what you want to achieve\" [--success CRITERION ...][/red]")
             return 1
         g = rt.goals.add(Goal(title=args.text[:160], description=args.text, success=args.success or []))
         rt.goals.log(g, "created", "goal set from the CLI")
@@ -432,7 +432,7 @@ async def cmd_memory(rt: Runtime, args: argparse.Namespace) -> int:
 
 async def cmd_doctor(rt: Runtime, args: argparse.Namespace) -> int:
     ok = True
-    table = Table(title="kestrel doctor", border_style="grey35")
+    table = Table(title="cadence doctor", border_style="grey35")
     for col in ("check", "result", "detail"):
         table.add_column(col)
     for role, cfg in (("big", rt.cfg.big), ("small", rt.cfg.small)):
@@ -558,7 +558,7 @@ def _print_startup(rt: Runtime) -> None:
 
 def _print_mcp(rt: Runtime) -> None:
     if not rt.mcp.connections:
-        console.print("[dim]no MCP servers configured — add them under `mcp_servers:` in ~/.kestrel/config.yaml[/dim]")
+        console.print("[dim]no MCP servers configured — add them under `mcp_servers:` in ~/.cadence/config.yaml[/dim]")
     for name, connected, n, err in rt.mcp.status():
         console.print(f"[{'green' if connected else 'red'}]{'●' if connected else '○'}[/] [bold]{name}[/] " + (f"{n} tools" if connected else err))
 

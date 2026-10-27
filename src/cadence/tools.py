@@ -125,7 +125,7 @@ def _schema(props: dict[str, Any], required: list[str]) -> dict[str, Any]:
 
 
 def builtin_tools(ws: Workspace, *, allow_shell: bool, output_limit: int, sandbox: Any = None, vision: Any = None) -> list[Tool]:
-    """`sandbox` is a `kestrel.sandbox.Sandbox` (None = unsandboxed); `vision` an LLM enabling `view_image`."""
+    """`sandbox` is a `cadence.sandbox.Sandbox` (None = unsandboxed); `vision` an LLM enabling `view_image`."""
     from .sandbox import Sandbox, SandboxError
     from .config import SandboxConfig
 

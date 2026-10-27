@@ -1,5 +1,5 @@
-# Optional vector store for Kestrel memory.  Start:  docker compose -f deploy/docker-compose.yml up -d
-# Then set `memory: {backend: qdrant}` in ~/.kestrel/config.yaml and run `kestrel memory reindex`.
+# Optional vector store for Cadence memory.  Start:  docker compose -f deploy/docker-compose.yml up -d
+# Then set `memory: {backend: qdrant}` in ~/.cadence/config.yaml and run `cadence memory reindex`.
 services:
   qdrant:
     image: qdrant/qdrant:v1.12.4

@@ -126,7 +126,8 @@ class Hooks:
         try:
             proc = await asyncio.create_subprocess_shell(
                 h.command, cwd=self.workspace, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, env={**os.environ, "KESTREL_HOOK_EVENT": payload["event"]})
+                stderr=asyncio.subprocess.PIPE, env={**os.environ, "CADENCE_HOOK_EVENT": payload["event"],
+                                                                     "KESTREL_HOOK_EVENT": payload["event"]})  # pre-rename hook scripts
             out, err = await asyncio.wait_for(proc.communicate(json.dumps(payload, default=str).encode()), h.timeout)
         except asyncio.TimeoutError:
             proc.kill()

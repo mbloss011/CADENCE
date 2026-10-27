@@ -65,7 +65,7 @@ class Bridge:
         self.rt = runtime
         self.channel = channel
         self.chats: dict[str, _ChatState] = {}
-        self.inbox = runtime.cfg.workspace / ".kestrel" / "inbox" / channel
+        self.inbox = runtime.cfg.workspace / ".cadence" / "inbox" / channel
 
     def _state(self, chat_id: str) -> _ChatState:
         st = self.chats.get(chat_id)
@@ -121,7 +121,7 @@ class Bridge:
                 self.rt.daemon.submit(task)
                 return f"queued task {task.id} — I'll report back when it finishes"
             self.rt.tasks.add(task)
-            return f"queued task {task.id} (the daemon is not running, so it will start with `kestrel daemon`)"
+            return f"queued task {task.id} (the daemon is not running, so it will start with `cadence daemon`)"
         if cmd == "/goal":
             if not arg:
                 return "usage: /goal <what you want to achieve>"

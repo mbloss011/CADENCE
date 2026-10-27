@@ -1,6 +1,6 @@
-"""Example Kestrel plugin: copy to ~/.kestrel/plugins/ or <workspace>/.kestrel/plugins/."""
+"""Example Cadence plugin: copy to ~/.cadence/plugins/ or <workspace>/.cadence/plugins/."""
 
-from kestrel.hooks import HookResult
+from cadence.hooks import HookResult
 
 DANGEROUS = ("git push --force", "git push -f", "rm -rf /", "mkfs", ":(){")
 

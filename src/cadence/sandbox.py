@@ -76,7 +76,7 @@ class Sandbox:
                 args += ["--bind-try", p, p]
             args += ["--chdir", ws, "--setenv", "HOME", home, "--", "bash", "-c", command]
             return args
-        args = ["docker", "run", "--rm", "-i", "--init", "--name", name or f"kestrel-sbx-{uuid.uuid4().hex[:10]}",
+        args = ["docker", "run", "--rm", "-i", "--init", "--name", name or f"cadence-sbx-{uuid.uuid4().hex[:10]}",
                 "-v", f"{ws}:{ws}", "-w", ws, "-e", "HOME=/tmp", "--user", f"{os.getuid()}:{os.getgid()}"]
         if not self.cfg.network:
             args += ["--network", "none"]
@@ -93,7 +93,7 @@ class Sandbox:
         reason = self.check()
         if reason:
             raise SandboxError(reason)
-        name = f"kestrel-sbx-{uuid.uuid4().hex[:10]}"
+        name = f"cadence-sbx-{uuid.uuid4().hex[:10]}"
         proc = await asyncio.create_subprocess_exec(
             *self.argv(command, name),
             cwd=self.workspace,

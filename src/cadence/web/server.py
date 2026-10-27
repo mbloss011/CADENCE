@@ -1,6 +1,6 @@
 """Web GUI backend: REST for state, one WebSocket for live events, static React build.
 
-    kestrel web                 # http://127.0.0.1:8765 — runs chat sessions, the daemon and channels
+    cadence web                 # http://127.0.0.1:8765 — runs chat sessions, the daemon and channels
 
 Security: binds to loopback by default. Every request must carry a loopback (or configured) Host header,
 which defeats DNS rebinding, and state-changing requests/WebSockets must come from a matching Origin,
@@ -199,7 +199,7 @@ class Hub:
     async def attach(self, sid: str, files: list[Path]) -> str:
         """Copy uploads into the project (so the agent can read_file them further) and inline their contents."""
         project = self.rt.project(self.get(sid).agent.project)
-        folder = project.root / ".kestrel" / "attachments"
+        folder = project.root / ".cadence" / "attachments"
         folder.mkdir(parents=True, exist_ok=True)
         blocks = []
         for src in files:
@@ -309,10 +309,10 @@ def security_middleware(allowed_hosts: set[str], token: str | None):
         if not (_is_loopback(host) or host in allowed_hosts):
             return web.Response(status=403, text="host not allowed")
         if token:
-            supplied = request.cookies.get("kestrel_token") or request.query.get("token") or \
+            supplied = request.cookies.get("cadence_token") or request.query.get("token") or \
                 request.headers.get("Authorization", "").removeprefix("Bearer ")
             if not secrets.compare_digest(supplied or "", token):
-                return web.Response(status=401, text="token required: open the URL printed by `kestrel web`")
+                return web.Response(status=401, text="token required: open the URL printed by `cadence web`")
         is_ws = request.headers.get("Upgrade", "").lower() == "websocket"
         if request.method not in ("GET", "HEAD", "OPTIONS") or is_ws:
             origin = request.headers.get("Origin")
@@ -322,7 +322,7 @@ def security_middleware(allowed_hosts: set[str], token: str | None):
                     return web.Response(status=403, text="cross-origin request refused")
         resp = await handler(request)
         if token and request.query.get("token"):
-            resp.set_cookie("kestrel_token", token, httponly=True, samesite="Strict")
+            resp.set_cookie("cadence_token", token, httponly=True, samesite="Strict")
         return resp
     return mw
 
@@ -364,7 +364,7 @@ def build_app(rt: Runtime, *, allowed_hosts: set[str] | None = None, token: str 
                 await probe.aclose()
         scope = rt.scope(req.query.get("project", ""))
         return web.json_response({
-            "version": __import__("kestrel").__version__,
+            "version": __import__("cadence").__version__,
             "workspace": str(scope.project.path),
             "models": models,
             "vision": cfg.vision.name if cfg.vision else cfg.big.name,

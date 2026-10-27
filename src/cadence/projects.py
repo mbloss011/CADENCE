@@ -88,7 +88,7 @@ async def suggest_name(llm: LLM, path: Path) -> str:
         return fallback_name(path)
     name = comp.content.strip().splitlines()[0] if comp.content.strip() else ""
     name = re.sub(r"^(project name|name)\s*:\s*", "", name, flags=re.I).strip(" \"'`*.#")
-    if " " not in name:  # small models like to answer "Kestrel-Autonomous-Chat"
+    if " " not in name:  # small models like to answer "Garden-Planner-Site"
         name = " ".join(w[:1].upper() + w[1:] for w in re.split(r"[-_]+", name) if w)
     if not name or len(name) > 40 or len(name.split()) > 5:
         return fallback_name(path)

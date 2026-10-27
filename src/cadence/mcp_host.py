@@ -78,7 +78,7 @@ class McpHost:
             from mcp.client.stdio import stdio_client
 
             command = sys.executable if cfg.command in ("python", "python3") else cfg.command
-            env = {k: str(expand_env(v)) for k, v in cfg.env.items()}  # $NAME values come from Kestrel's environment
+            env = {k: str(expand_env(v)) for k, v in cfg.env.items()}  # $NAME values come from Cadence's environment
             params = StdioServerParameters(command=command, args=cfg.args, env={**os.environ, **env} if env else None)
             async with AsyncExitStack() as stack:
                 read, write = await stack.enter_async_context(stdio_client(params))

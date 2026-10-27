@@ -1,4 +1,4 @@
-"""Configuration: defaults < ~/.kestrel/config.yaml < ./.kestrel/config.yaml < ~/.kestrel/settings.json < env vars.
+"""Configuration: defaults < ~/.cadence/config.yaml < ./.cadence/config.yaml < ~/.cadence/settings.json < env vars.
 
 `settings.json` is written by the web UI. It uses the same keys as config.yaml, but lists in it
 (hooks, mcp_servers, providers) replace the lists from the YAML files instead of extending them.
@@ -15,7 +15,10 @@ from typing import Any
 
 import yaml
 
-HOME_DIR = Path(os.environ.get("KESTREL_HOME", Path.home() / ".kestrel"))
+from .migrate import legacy_env, migrate_home, migrate_project
+
+legacy_env()  # KESTREL_* (pre-rename) variables still work
+HOME_DIR = Path(os.environ.get("CADENCE_HOME", Path.home() / ".cadence"))
 
 
 @dataclass
@@ -50,7 +53,7 @@ class MemoryConfig:
     query_prefix: str = "search_query: "      # nomic-style task prefixes; set both to "" for other embedders
     doc_prefix: str = "search_document: "
     qdrant_url: str = "http://localhost:6333"
-    collection: str = "kestrel_memory"
+    collection: str = "cadence_memory"
     semantic_weight: float = 0.75  # blend of vector similarity vs keyword overlap
     min_similarity: float = 0.55   # cosine floor; nomic-embed scores unrelated text around 0.45-0.5
 
@@ -129,12 +132,12 @@ class Config:
         self.home = Path(self.home)
         self.skill_dirs = [Path(p) for p in self.skill_dirs] or [
             self.home / "skills",
-            self.workspace / ".kestrel" / "skills",
+            self.workspace / ".cadence" / "skills",
             self.workspace / ".agents" / "skills",
         ]
         self.plugin_dirs = [Path(p) for p in self.plugin_dirs] or [
             self.home / "plugins",
-            self.workspace / ".kestrel" / "plugins",
+            self.workspace / ".cadence" / "plugins",
         ]
 
     @property
@@ -244,15 +247,17 @@ def write_settings(cfg: Config, data: dict[str, Any]) -> None:
 
 
 ENV_LOCKS = {  # env var → the setting it pins, so the UI can say why an edit will not survive a restart
-    "LMSTUDIO_URL": "big.base_url", "KESTREL_BIG_MODEL": "big.name", "KESTREL_SMALL_MODEL": "small.name",
-    "KESTREL_BIG_URL": "big.base_url", "KESTREL_SMALL_URL": "small.base_url", "KESTREL_SANDBOX": "sandbox.mode",
-    "KESTREL_MEMORY_BACKEND": "memory.backend",
+    "LMSTUDIO_URL": "big.base_url", "CADENCE_BIG_MODEL": "big.name", "CADENCE_SMALL_MODEL": "small.name",
+    "CADENCE_BIG_URL": "big.base_url", "CADENCE_SMALL_URL": "small.base_url", "CADENCE_SANDBOX": "sandbox.mode",
+    "CADENCE_MEMORY_BACKEND": "memory.backend",
 }
 
 
 def load_config(workspace: Path | None = None) -> Config:
     cfg = Config(workspace=workspace or Path.cwd())
-    for path in (cfg.home / "config.yaml", cfg.workspace / ".kestrel" / "config.yaml"):
+    migrate_home(cfg.home)        # one-time Kestrel → Cadence move; no-op afterwards
+    migrate_project(cfg.workspace)
+    for path in (cfg.home / "config.yaml", cfg.workspace / ".cadence" / "config.yaml"):
         if path.is_file():
             _apply(cfg, yaml.safe_load(path.read_text(encoding="utf-8")) or {})
     _apply(cfg, read_settings(cfg), replace_lists=True)
@@ -262,18 +267,18 @@ def load_config(workspace: Path | None = None) -> Config:
         url = env["LMSTUDIO_URL"].rstrip("/")
         url = url if url.endswith("/v1") else f"{url}/v1"
         cfg.big.base_url = cfg.small.base_url = url
-    if env.get("KESTREL_BIG_MODEL"):
-        cfg.big.name = env["KESTREL_BIG_MODEL"]
-    if env.get("KESTREL_SMALL_MODEL"):
-        cfg.small.name = env["KESTREL_SMALL_MODEL"]
-    if env.get("KESTREL_BIG_URL"):
-        cfg.big.base_url = env["KESTREL_BIG_URL"]
-    if env.get("KESTREL_SMALL_URL"):
-        cfg.small.base_url = env["KESTREL_SMALL_URL"]
-    if env.get("KESTREL_SANDBOX"):
-        cfg.sandbox.mode = env["KESTREL_SANDBOX"]
-    if env.get("KESTREL_MEMORY_BACKEND"):
-        cfg.memory.backend = env["KESTREL_MEMORY_BACKEND"]
+    if env.get("CADENCE_BIG_MODEL"):
+        cfg.big.name = env["CADENCE_BIG_MODEL"]
+    if env.get("CADENCE_SMALL_MODEL"):
+        cfg.small.name = env["CADENCE_SMALL_MODEL"]
+    if env.get("CADENCE_BIG_URL"):
+        cfg.big.base_url = env["CADENCE_BIG_URL"]
+    if env.get("CADENCE_SMALL_URL"):
+        cfg.small.base_url = env["CADENCE_SMALL_URL"]
+    if env.get("CADENCE_SANDBOX"):
+        cfg.sandbox.mode = env["CADENCE_SANDBOX"]
+    if env.get("CADENCE_MEMORY_BACKEND"):
+        cfg.memory.backend = env["CADENCE_MEMORY_BACKEND"]
 
     # Workspace-local skill dirs are resolved after overrides.
     cfg.__post_init__()

@@ -5,10 +5,10 @@ import asyncio
 from aiohttp.test_utils import TestClient, TestServer
 from conftest import tool_call
 
-from kestrel.llm import Completion
-from kestrel.memory import MemoryStore
-from kestrel.runtime import Runtime
-from kestrel.web.server import build_app
+from cadence.llm import Completion
+from cadence.memory import MemoryStore
+from cadence.runtime import Runtime
+from cadence.web.server import build_app
 
 ORIGIN = {"Origin": "http://127.0.0.1"}
 
@@ -91,7 +91,7 @@ async def test_token_is_required_when_configured(cfg, make_router):
     try:
         assert (await client.get("/api/sessions")).status == 401
         ok = await client.get("/api/sessions?token=s3cret")
-        assert ok.status == 200 and "kestrel_token" in ok.cookies
+        assert ok.status == 200 and "cadence_token" in ok.cookies
         assert (await client.get("/api/sessions")).status == 200  # cookie now set
     finally:
         await client.close()
@@ -136,13 +136,13 @@ async def test_any_file_can_be_attached_and_is_read_into_the_message(cfg, make_r
         await ws.send_json({"op": "send", "session": sid, "text": "how old is Ada?", "files": [doc["id"]]})
         await _until_finished(ws, sid)
         sent = router.big.calls[0][-1]["content"]
-        assert "how old is Ada?" in sent and "### people.csv (table) — saved as .kestrel/attachments/people.csv" in sent
+        assert "how old is Ada?" in sent and "### people.csv (table) — saved as .cadence/attachments/people.csv" in sent
         assert "| Ada | 36 |" in sent
-        assert (cfg.workspace / ".kestrel/attachments/people.csv").read_text().startswith("name,age")
+        assert (cfg.workspace / ".cadence/attachments/people.csv").read_text().startswith("name,age")
         item = (await (await client.get(f"/api/sessions/{sid}")).json())["items"][0]
         assert item["text"] == "how old is Ada?" and item["files"] == [
-            {"name": "people.csv", "kind": "table", "path": ".kestrel/attachments/people.csv"}]
-        prev = await (await client.get("/api/files/preview?path=.kestrel/attachments/people.csv")).json()
+            {"name": "people.csv", "kind": "table", "path": ".cadence/attachments/people.csv"}]
+        prev = await (await client.get("/api/files/preview?path=.cadence/attachments/people.csv")).json()
         assert prev["tables"][0]["columns"] == ["name", "age"]
         await ws.close()
     finally:
@@ -159,7 +159,7 @@ async def test_projects_can_be_archived(cfg, make_router, tmp_path):
         assert (await client.patch(f"/api/projects/{rt.default_project.id}", json={"archived": True}, headers=ORIGIN)).status == 409
         a = await (await client.patch(f"/api/projects/{p['id']}", json={"archived": True}, headers=ORIGIN)).json()
         assert a["archived"] is True and rt.projects.get(p["id"]).archived
-        from kestrel.tasks import Task
+        from cadence.tasks import Task
         rt.tasks.add(Task(title="dormant", project=p["id"]))
         rt.make_daemon()
         rt.daemon._launch_ready()

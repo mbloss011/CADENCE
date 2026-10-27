@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kestrel.context import ContextManager
+from cadence.context import ContextManager
 
 
 def _fill(ctx: ContextManager, turns: int, size: int = 1200) -> None:
@@ -43,7 +43,7 @@ async def test_summary_included_in_system_prompt(cfg, make_router):
 
 
 async def test_small_model_failure_falls_back_to_deterministic_summary(cfg, make_router):
-    from kestrel.llm import LLMError
+    from cadence.llm import LLMError
 
     cfg.big.context_window = 6000
     router = make_router()

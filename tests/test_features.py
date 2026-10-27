@@ -11,20 +11,20 @@ import httpx
 import pytest
 from conftest import ScriptedLLM, tool_call
 
-from kestrel.agent import Agent
-from kestrel.channels import Bridge, chunk
-from kestrel.channels.telegram import TelegramChannel
-from kestrel.channels.whatsapp import WhatsAppChannel
-from kestrel.config import HookConfig, SandboxConfig
-from kestrel.context import deterministic_summary, render_transcript
-from kestrel.hooks import Hooks
-from kestrel.llm import Completion, LLMError, content_text, message_tokens
-from kestrel.memory import LocalVectorIndex, MemoryStore, QdrantIndex, SemanticIndex
-from kestrel.plugins import PluginManager
-from kestrel.runtime import Runtime
-from kestrel.sandbox import Sandbox
-from kestrel.skills import SkillRegistry
-from kestrel.tools import ToolRegistry, Workspace, builtin_tools
+from cadence.agent import Agent
+from cadence.channels import Bridge, chunk
+from cadence.channels.telegram import TelegramChannel
+from cadence.channels.whatsapp import WhatsAppChannel
+from cadence.config import HookConfig, SandboxConfig
+from cadence.context import deterministic_summary, render_transcript
+from cadence.hooks import Hooks
+from cadence.llm import Completion, LLMError, content_text, message_tokens
+from cadence.memory import LocalVectorIndex, MemoryStore, QdrantIndex, SemanticIndex
+from cadence.plugins import PluginManager
+from cadence.runtime import Runtime
+from cadence.sandbox import Sandbox
+from cadence.skills import SkillRegistry
+from cadence.tools import ToolRegistry, Workspace, builtin_tools
 
 PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
@@ -214,7 +214,7 @@ async def test_user_prompt_hook_can_add_context_or_block(cfg, make_router):
 
 
 PLUGIN = '''
-from kestrel.hooks import HookResult
+from cadence.hooks import HookResult
 
 def register(api):
     @api.tool("shout", "Upper-case text.", {"type": "object", "properties": {"text": {"type": "string"}}}, read_only=True)
@@ -229,7 +229,7 @@ def register(api):
 
 
 async def test_plugin_adds_tool_and_hook_and_bad_plugin_is_reported(cfg, make_router):
-    pdir = cfg.workspace / ".kestrel" / "plugins"
+    pdir = cfg.workspace / ".cadence" / "plugins"
     pdir.mkdir(parents=True)
     (pdir / "demo.py").write_text(PLUGIN)
     (pdir / "broken.py").write_text("raise RuntimeError('boom')")
@@ -250,14 +250,14 @@ async def test_plugin_adds_tool_and_hook_and_bad_plugin_is_reported(cfg, make_ro
 
 
 def test_config_parses_new_sections_and_env_secrets(tmp_path, monkeypatch):
-    monkeypatch.setenv("KESTREL_HOME", str(tmp_path))
+    monkeypatch.setenv("CADENCE_HOME", str(tmp_path))
     monkeypatch.setenv("TG_TOKEN", "123:abc")
     (tmp_path / "config.yaml").write_text(
         "memory: {backend: qdrant, min_similarity: 0.6}\nsandbox: {mode: bwrap, network: false}\n"
         "vision: {name: qwen/qwen3.5-9b}\nhooks:\n  - {event: pre_tool, matcher: bash, command: ./guard.sh}\n"
         "plugins: {disabled: [noisy]}\nchannels:\n  telegram: {token: $TG_TOKEN, allowed_chats: [42]}\n")
     import importlib
-    import kestrel.config as c
+    import cadence.config as c
     importlib.reload(c)
     cfg = c.load_config(tmp_path)
     assert cfg.memory.backend == "qdrant" and cfg.memory.min_similarity == 0.6
@@ -277,7 +277,7 @@ async def test_bwrap_confines_writes_hides_home_and_cuts_network(tmp_path):
     ws.mkdir()
     outside = tmp_path / "outside.txt"
     sb = Sandbox(SandboxConfig(mode="bwrap", network=False), ws)
-    res = await sb.run(f"touch inside.txt; touch {outside} 2>/dev/null; touch /etc/kestrel_x 2>/dev/null && echo ETC; "
+    res = await sb.run(f"touch inside.txt; touch {outside} 2>/dev/null; touch /etc/cadence_x 2>/dev/null && echo ETC; "
                        "ls -A ~ | wc -l; timeout 3 bash -c 'echo > /dev/tcp/1.1.1.1/53' 2>/dev/null && echo NET || echo nonet", 20)
     assert res.exit == 0 and (ws / "inside.txt").exists()
     # /tmp inside the sandbox is a private tmpfs: writes there never reach the host
@@ -295,12 +295,12 @@ async def test_bwrap_timeout_kills_command(tmp_path):
 @needs_bwrap
 async def test_goal_verify_runs_inside_sandbox(cfg, make_router):
     from test_tasks import make_runner, reflection
-    from kestrel.tasks import Task
+    from cadence.tasks import Task
 
     router = make_router(big_script=[Completion(content="did it"), reflection("done")])
     runner, store, _ = make_runner(cfg, router)
     runner.sandbox = Sandbox(SandboxConfig(mode="bwrap"), cfg.workspace)
-    goal = store.add(Task(title="t", verify_command="touch /etc/kestrel_should_fail"))
+    goal = store.add(Task(title="t", verify_command="touch /etc/cadence_should_fail"))
     await runner.run(goal)
     assert goal.reflections[0]["verify"]["exit"] != 0  # /etc is read-only inside the sandbox
 
@@ -330,7 +330,7 @@ class FakeTelegram:
         method = req.url.path.rsplit("/", 1)[-1]
         body = json.loads(req.content or b"{}")
         if method == "getMe":
-            return httpx.Response(200, json={"ok": True, "result": {"username": "kestrel_bot"}})
+            return httpx.Response(200, json={"ok": True, "result": {"username": "cadence_bot"}})
         if method == "getUpdates":
             batch, self.updates = self.updates, []
             return httpx.Response(200, json={"ok": True, "result": batch})
@@ -340,7 +340,7 @@ class FakeTelegram:
 
 
 async def test_telegram_routes_allowed_chat_to_agent_and_rejects_others(cfg, make_router):
-    rt = await _runtime(cfg, make_router(big_script=[Completion(content="hello from kestrel")]))
+    rt = await _runtime(cfg, make_router(big_script=[Completion(content="hello from cadence")]))
     fake = FakeTelegram([
         {"update_id": 1, "message": {"chat": {"id": 42}, "text": "hi"}},
         {"update_id": 2, "message": {"chat": {"id": 666}, "text": "let me in"}},
@@ -357,7 +357,7 @@ async def test_telegram_routes_allowed_chat_to_agent_and_rejects_others(cfg, mak
     stop.set()
     await asyncio.wait_for(task, 5)
     await rt.close()
-    assert ("42", "hello from kestrel") in fake.sent and ("42", "no goals") in fake.sent
+    assert ("42", "hello from cadence") in fake.sent and ("42", "no goals") in fake.sent
     assert any(c == "666" and "Not authorized" in t for c, t in fake.sent)
 
 

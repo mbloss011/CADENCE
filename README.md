@@ -15,8 +15,9 @@ semantic memory, image understanding, hooks/plugins, sandboxed shell, and Telegr
 
 Both are served through any OpenAI-compatible endpoint (LM Studio default: `http://localhost:1234/v1`).
 
-> The command is `cadence` (`kestrel` still works as an alias). The Python package is still `kestrel`
-> and settings, sessions and memory live in `~/.kestrel/`, so existing installs keep their data.
+> Formerly **Kestrel**. On first start Cadence migrates an existing install once: `~/.kestrel` moves to
+> `~/.cadence` (a symlink stays behind), each project's `.kestrel/` folder becomes `.cadence/`, plugin imports
+> are rewritten (`.kestrel-bak` backups kept) and `KESTREL_*` environment variables still work as fallbacks.
 
 ## Quick start
 
@@ -35,8 +36,8 @@ cadence inspect plugins                    # also: hooks | tools | skills | mcp
 
 In chat: `/image <path> [prompt]`, `/memory <query>`, `/plugins`, `/hooks`, `/help` for the rest.
 
-Config: copy `examples/config.yaml` to `~/.kestrel/config.yaml`. Env overrides: `LMSTUDIO_URL`,
-`KESTREL_BIG_MODEL`, `KESTREL_SMALL_MODEL`, `KESTREL_BIG_URL`, `KESTREL_SMALL_URL`, `KESTREL_HOME`.
+Config: copy `examples/config.yaml` to `~/.cadence/config.yaml`. Env overrides: `LMSTUDIO_URL`,
+`CADENCE_BIG_MODEL`, `CADENCE_SMALL_MODEL`, `CADENCE_BIG_URL`, `CADENCE_SMALL_URL`, `CADENCE_HOME`.
 
 ## Web GUI
 
@@ -58,7 +59,7 @@ cadence web --open     # and open the browser    ·  --no-daemon / --no-channels
     clicks, typing and scrolling go to the page, so you can log in or solve a captcha and hand back. The
     agent uses `browser_open/snapshot/click/type/scroll/back/key/look`. Logins persist per project.
 - **Any file type**: drop any file into chat (PDF, Word, PowerPoint, Excel/CSV, JSON/YAML, notebooks, epub,
-  SQLite, archives, media, code…). It is saved to `.kestrel/attachments/` in the project and its contents are
+  SQLite, archives, media, code…). It is saved to `.cadence/attachments/` in the project and its contents are
   extracted into the message. The agent's `read_file` reads every type the same way (tables get column stats;
   `pages=` for PDFs, `sheet=` for workbooks), and `view_image` looks at any image format or any page of a PDF
   or office document with the vision model (charts, layouts, scanned pages). Legacy `.doc/.ppt/.ods` go
@@ -79,17 +80,17 @@ cadence web --open     # and open the browser    ·  --no-daemon / --no-channels
   **hooks** (with a Test button). All live, including in chats already running.
 - **Settings**: model roles picked from what LM Studio / Ollama / any OpenAI-compatible server actually has
   (scanned live: type, load state, quantization), per-model parameters, agent and daemon limits, sandbox,
-  memory, browser, projects, status. Saved to `~/.kestrel/settings.json` (same keys as `config.yaml`,
+  memory, browser, projects, status. Saved to `~/.cadence/settings.json` (same keys as `config.yaml`,
   layered on top of it), applied live, kept across restarts. Theme and active project sync across browsers.
 - **Memory**: semantic search, add and forget memories.
 
 Loopback-only by default; requests must carry a loopback `Host` (anti DNS-rebinding) and a same-site
 `Origin`. Binding elsewhere (`--host 0.0.0.0`) requires a token, auto-generated and printed. Project files
 are served with `Content-Security-Policy: sandbox`, so an HTML file the agent wrote cannot call the API.
-The shared browser needs `pip install "kestrel-agent[browser]"` and Chrome/Chromium (or `playwright install chromium`);
+The shared browser needs `pip install "cadence-agent[browser]"` and Chrome/Chromium (or `playwright install chromium`);
 it runs outside the bash sandbox, with network access.
 Frontend source is in `web/` (React + Vite + Tailwind): `cd web && npm install && npm run build`
-writes to `src/kestrel/web/static/`; `npm run dev` hot-reloads against a running `cadence web`.
+writes to `src/cadence/web/static/`; `npm run dev` hot-reloads against a running `cadence web`.
 
 ### CLI equivalents
 
@@ -148,8 +149,8 @@ plugins.py (register(api): tools + hooks)
   diagrams). Compaction only ever sees `[image]` placeholders, never base64.
 - **Hooks** (`hooks.py`): `session_start`, `user_prompt`, `pre_tool`, `post_tool`, `stop`, `task_done` (alias `goal_done`), `goal_achieved`.
   Shell hooks get JSON on stdin; exit 2 blocks with stderr as the reason, stdout on exit 0 becomes context.
-- **Plugins** (`plugins.py`): `register(api)` modules in `~/.kestrel/plugins` / `.kestrel/plugins` or
-  `kestrel.plugins` entry points; `@api.tool(...)` and `@api.on(event, matcher)`. See `examples/plugins/`.
+- **Plugins** (`plugins.py`): `register(api)` modules in `~/.cadence/plugins` / `.cadence/plugins` or
+  `cadence.plugins` entry points; `@api.tool(...)` and `@api.on(event, matcher)`. See `examples/plugins/`.
   Plugins and workspace config run with your privileges — only use ones you trust.
 - **Sandbox** (`sandbox.py`): `bwrap` gives a read-only host, writable workspace, private `/tmp`, hidden
   `$HOME` and optional network cut-off; `docker` runs a throwaway container as your uid. Applies to

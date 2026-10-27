@@ -304,7 +304,7 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
     @r.post("/api/daemon/{action}")
     async def daemon_action(req: web.Request) -> web.Response:
         if not rt.daemon:
-            raise web.HTTPConflict(text="daemon not running (start `kestrel web` without --no-daemon)")
+            raise web.HTTPConflict(text="daemon not running (start `cadence web` without --no-daemon)")
         action = req.match_info["action"]
         if action not in ("pause", "resume"):
             raise web.HTTPNotFound()

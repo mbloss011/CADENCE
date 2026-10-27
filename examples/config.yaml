@@ -1,4 +1,4 @@
-# Copy to ~/.kestrel/config.yaml (global) or <workspace>/.kestrel/config.yaml (per project).
+# Copy to ~/.cadence/config.yaml (global) or <workspace>/.cadence/config.yaml (per project).
 # Precedence: defaults < global < workspace < environment variables.
 
 big:                          # plans, writes code, reflects
@@ -15,11 +15,11 @@ compact_target: 0.40          # compact down to 40%
 keep_recent_messages: 8
 reflection_cycles: 6          # idea/improvement cycles per day in daemon mode
 max_reflections_per_goal: 3
-auto_approve_ideas: false     # autonomous ideas wait for `kestrel goals approve <id>`
+auto_approve_ideas: false     # autonomous ideas wait for `cadence goals approve <id>`
 max_parallel_goals: 2
 allow_shell: true
 
-# Extra Agent Skills directories (defaults: ~/.kestrel/skills, .kestrel/skills, .agents/skills)
+# Extra Agent Skills directories (defaults: ~/.cadence/skills, .cadence/skills, .agents/skills)
 # skill_dirs: [~/my-skills]
 
 # MCP servers (stdio). Tools appear as mcp__<server>__<tool>. Browser use and computer use
@@ -36,7 +36,7 @@ mcp_servers:
 
 # ── Long-term memory ───────────────────────────────────────────────────────────────────────
 # Hybrid retrieval: vector similarity (embedding model) + keyword overlap + recency.
-# local  = vectors in ~/.kestrel/state/memory.vectors.jsonl (no services)
+# local  = vectors in ~/.cadence/state/memory.vectors.jsonl (no services)
 # qdrant = Qdrant server; start it with: docker compose -f deploy/docker-compose.yml up -d
 # keyword = no embeddings (previous behaviour). If the embedder is down, search falls back to keywords.
 memory:
@@ -48,7 +48,7 @@ memory:
   semantic_weight: 0.75
 
 # ── Image understanding ────────────────────────────────────────────────────────────────────
-# `view_image` tool, `/image` in chat, `kestrel run --image`, photos sent over Telegram/WhatsApp.
+# `view_image` tool, `/image` in chat, `cadence run --image`, photos sent over Telegram/WhatsApp.
 # Defaults to the big model (ornith-1.5-9b is a VLM). Point at another VLM if yours is text-only:
 # vision: {name: qwen/qwen3.5-9b}
 
@@ -71,15 +71,15 @@ sandbox:
 #     matcher: bash                 # glob on tool name
 #     command: ./scripts/guard.sh
 #   - event: task_done
-#     command: notify-send "kestrel" "goal finished"
+#     command: notify-send "cadence" "goal finished"
 
 # ── Plugins ────────────────────────────────────────────────────────────────────────────────
-# Python files with register(api) in ~/.kestrel/plugins or <workspace>/.kestrel/plugins
-# (see examples/plugins/guard.py), or packages with a `kestrel.plugins` entry point.
+# Python files with register(api) in ~/.cadence/plugins or <workspace>/.cadence/plugins
+# (see examples/plugins/guard.py), or packages with a `cadence.plugins` entry point.
 # plugins:
 #   disabled: [some_plugin]
 
-# ── Messaging channels (run by `kestrel daemon`) ────────────────────────────────────────────
+# ── Messaging channels (run by `cadence daemon`) ────────────────────────────────────────────
 # Secrets as $ENV_VAR references. An allowlist is mandatory: the agent can run commands here.
 # channels:
 #   telegram:

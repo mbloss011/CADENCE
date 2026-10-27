@@ -10,12 +10,12 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from conftest import tool_call
 
-from kestrel.goals import Goal
-from kestrel.llm import Completion
-from kestrel.memory import MemoryStore
-from kestrel.projects import ProjectError, check_path, suggest_name
-from kestrel.runtime import Runtime
-from kestrel.web.server import build_app
+from cadence.goals import Goal
+from cadence.llm import Completion
+from cadence.memory import MemoryStore
+from cadence.projects import ProjectError, check_path, suggest_name
+from cadence.runtime import Runtime
+from cadence.web.server import build_app
 
 ORIGIN = {"Origin": "http://127.0.0.1"}
 
@@ -199,7 +199,7 @@ async def test_settings_persist_and_apply_live(cfg, make_router):
         assert rt.router.big.llm.name == "qwen/qwen3.5-9b"  # swapped without a restart
         assert rt.cfg.max_iterations == 12 and rt.cfg.reflection_cycles == 3 and rt.cfg.auto_approve_ideas is True
         assert view["ui"] == {"theme": "light", "project": "abc"}
-        from kestrel.config import Config, _apply, read_settings
+        from cadence.config import Config, _apply, read_settings
         fresh = Config(workspace=cfg.workspace, home=cfg.home)
         _apply(fresh, read_settings(fresh), replace_lists=True)
         assert fresh.big.name == "qwen/qwen3.5-9b" and fresh.max_iterations == 12
@@ -344,10 +344,10 @@ async def test_canvas_round_trip_between_agent_and_user(cfg, make_router):
 
 
 # ─────────────────────────────────────────────────────────────── browser
-@pytest.mark.skipif(not __import__("kestrel.browser", fromlist=["find_chrome"]).find_chrome(), reason="no Chrome/Chromium")
+@pytest.mark.skipif(not __import__("cadence.browser", fromlist=["find_chrome"]).find_chrome(), reason="no Chrome/Chromium")
 async def test_agent_browser_snapshot_click_and_type(cfg):
     pytest.importorskip("playwright")
-    from kestrel.browser import BrowserManager, browser_tools
+    from cadence.browser import BrowserManager, browser_tools
 
     events: list[dict] = []
 

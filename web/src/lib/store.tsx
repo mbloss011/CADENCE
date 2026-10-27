@@ -195,8 +195,8 @@ const StoreCtx = createContext<Ctx | null>(null);
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, {
     sessions: [], chats: {}, connected: false, liveTick: 0, notices: [], projects: [],
-    project: readLocal("kestrel.project", ""),
-    dock: { tab: (readLocal("kestrel.dock", "plan") || null) as DockTab | null, canvasId: null },
+    project: readLocal("cadence.project", ""),
+    dock: { tab: (readLocal("cadence.dock", "plan") || null) as DockTab | null, canvasId: null },
     draft: null,
   });
   const projectRef = useRef(state.project);
@@ -225,11 +225,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!state.project) return;
-    writeLocal("kestrel.project", state.project);
+    writeLocal("cadence.project", state.project);
     refreshSessions().catch(() => undefined);
   }, [state.project, refreshSessions]);
 
-  useEffect(() => writeLocal("kestrel.dock", state.dock.tab ?? ""), [state.dock.tab]);
+  useEffect(() => writeLocal("cadence.dock", state.dock.tab ?? ""), [state.dock.tab]);
 
   useEffect(() => {
     const offState = socket.onState((v) => dispatch({ t: "connected", v }));

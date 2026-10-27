@@ -23,6 +23,7 @@ from .ideas import IdeaStore, ideate
 from .llm import ModelRouter
 from .mcp_host import McpHost
 from .memory import MemoryStore, build_memory
+from .migrate import migrate_project
 from .plugins import PluginManager
 from .projects import Project, ProjectStore
 from .sandbox import Sandbox
@@ -55,7 +56,7 @@ class Scope:
         root = project.root
         base = rt.cfg
         global_dirs = [d for d in base.skill_dirs if base.workspace not in Path(d).resolve().parents]
-        self.cfg = ScopedConfig(base, root, global_dirs + [root / ".kestrel" / "skills", root / ".agents" / "skills"])
+        self.cfg = ScopedConfig(base, root, global_dirs + [root / ".cadence" / "skills", root / ".agents" / "skills"])
         self.workspace = Workspace(root)
         self.sandbox = Sandbox(base.sandbox, root)  # shares the SandboxConfig object: mode changes apply live
         self.hooks = rt.hooks.scoped(root)
@@ -100,6 +101,8 @@ class Runtime:
         self.browser = BrowserManager(cfg, self.publish)
         self.listeners: list[Listener] = []
         self._scopes: dict[str, Scope] = {}
+        for p in self.projects.all():  # one-time Kestrel → Cadence: <project>/.kestrel → .cadence
+            migrate_project(p.root)
         self.default_project = self.projects.ensure(cfg.workspace)
         self.planner = Planner(self.router, self.goals, self.tasks, self.memory, cfg)
         self.runner = TaskRunner(cfg, self.router, self.tasks, self.memory, self.new_agent, self.sandbox, self.hooks,

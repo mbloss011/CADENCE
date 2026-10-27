@@ -5,11 +5,11 @@ import json
 
 from conftest import tool_call
 
-from kestrel.agent import Agent
-from kestrel.llm import Completion
-from kestrel.memory import MemoryStore
-from kestrel.skills import SkillRegistry
-from kestrel.tools import ToolRegistry, Workspace, builtin_tools
+from cadence.agent import Agent
+from cadence.llm import Completion
+from cadence.memory import MemoryStore
+from cadence.skills import SkillRegistry
+from cadence.tools import ToolRegistry, Workspace, builtin_tools
 
 
 def build_agent(cfg, router) -> Agent:
@@ -48,7 +48,7 @@ async def test_workspace_escape_is_blocked(cfg, make_router):
 
 
 async def test_invalid_tool_args_are_reported_not_crashing(cfg, make_router):
-    from kestrel.llm import ToolCall
+    from cadence.llm import ToolCall
     bad = Completion(tool_calls=[ToolCall(id="x", name="bash", arguments="{not json")])
     router = make_router(big_script=[bad, Completion(content="recovered")])
     events = await collect(build_agent(cfg, router), "go")

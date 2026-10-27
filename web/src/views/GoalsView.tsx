@@ -43,7 +43,7 @@ export function GoalsView({ status, onOpenSession: _open }: { status: Status | n
         <div className="flex-1 overflow-y-auto">
           <Empty icon={<Target size={18} />} title="No goals yet">
             A goal is something worth working toward over days, like “Ship v1 of the billing API” or “Get test coverage above 80%”.
-            Cadence plans the steps, runs them as tasks, learns from the results and reports progress.
+            CADENCE plans the steps, runs them as tasks, learns from the results and reports progress.
             <div className="mt-4"><button className="btn-primary" onClick={() => setEditing("new")}><Plus size={14} /> Set your first goal</button></div>
           </Empty>
         </div>

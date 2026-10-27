@@ -5,13 +5,13 @@ import json
 import sys
 from pathlib import Path
 
-from kestrel.autonomy import Daemon
-from kestrel.config import McpServerConfig, load_config
-from kestrel.tasks import Task
-from kestrel.llm import Completion, OpenAICompatLLM
-from kestrel.mcp_host import McpHost
-from kestrel.memory import MemoryStore
-from kestrel.tools import ToolRegistry
+from cadence.autonomy import Daemon
+from cadence.config import McpServerConfig, load_config
+from cadence.tasks import Task
+from cadence.llm import Completion, OpenAICompatLLM
+from cadence.mcp_host import McpHost
+from cadence.memory import MemoryStore
+from cadence.tools import ToolRegistry
 
 MCP_SERVER = '''
 from mcp.server.mcpserver import MCPServer
@@ -58,19 +58,19 @@ def test_memory_three_kinds_search_and_persistence(tmp_path: Path):
 
 
 def test_default_models_and_env_override(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("KESTREL_HOME", str(tmp_path))
+    monkeypatch.setenv("CADENCE_HOME", str(tmp_path))
     cfg = load_config(tmp_path)
     assert cfg.big.name == "ornith-1.5-9b" and cfg.small.name == "liquid/lfm2-1.2b"
     monkeypatch.setenv("LMSTUDIO_URL", "http://box:9999")
-    monkeypatch.setenv("KESTREL_SMALL_MODEL", "other-small")
+    monkeypatch.setenv("CADENCE_SMALL_MODEL", "other-small")
     cfg = load_config(tmp_path)
     assert cfg.big.base_url == "http://box:9999/v1" and cfg.small.name == "other-small"
 
 
 def test_yaml_config_declares_mcp_servers(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("KESTREL_HOME", str(tmp_path))
+    monkeypatch.setenv("CADENCE_HOME", str(tmp_path))
     (tmp_path / "config.yaml").write_text("big: {name: custom-big}\nmcp_servers:\n  fs: {command: npx, args: [-y, srv]}\n")
-    import importlib, kestrel.config as c
+    import importlib, cadence.config as c
     importlib.reload(c)
     cfg = c.load_config(tmp_path)
     assert cfg.big.name == "custom-big" and cfg.mcp_servers[0].name == "fs"
@@ -89,7 +89,7 @@ async def test_llm_stream_parser_assembles_tool_calls_from_sse(monkeypatch):
         body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
         return httpx.Response(200, content=body.encode(), headers={"content-type": "text/event-stream"})
 
-    from kestrel.config import ModelConfig
+    from cadence.config import ModelConfig
     llm = OpenAICompatLLM(ModelConfig(name="m"))
     llm._client = httpx.AsyncClient(base_url="http://x/v1", transport=httpx.MockTransport(handler))
     seen = []
@@ -118,7 +118,7 @@ async def test_daemon_runs_pending_goal_and_heartbeat_cycle(cfg, make_router):
     async def notify(kind, msg):
         notes.append(f"{kind}:{msg}")
 
-    from kestrel.ideas import IdeaStore, ideate
+    from cadence.ideas import IdeaStore, ideate
     ideas = IdeaStore(cfg.state_dir / "ideas.json")
 
     async def cycle() -> int:

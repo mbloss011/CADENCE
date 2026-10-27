@@ -247,7 +247,7 @@ class TaskRunner:
 
 
 def _tree_snapshot(root: Path, limit: int = 80) -> str:
-    skip = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".kestrel"}
+    skip = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".cadence"}
     out: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in skip)

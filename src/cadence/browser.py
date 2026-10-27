@@ -1,6 +1,6 @@
 """A shared browser the agent and the user drive together.
 
-One headless Chromium per project (persistent profile under ~/.kestrel/state/browser/<project>, so
+One headless Chromium per project (persistent profile under ~/.cadence/state/browser/<project>, so
 logins survive restarts). The web UI streams it live over CDP screencast and forwards the user's clicks
 and typing; the agent uses the `browser_*` tools, which work from a numbered list of the page's
 interactive elements so even small models can click reliably. Either side can take over at any time:

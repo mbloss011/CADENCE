@@ -177,7 +177,7 @@ export function Composer({
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           rows={1}
-          placeholder={running ? "Steer: e.g. “skip the tests for now, focus on the parser”" : "Ask Kestrel to build, fix, or explain something…"}
+          placeholder={running ? "Steer: e.g. “skip the tests for now, focus on the parser”" : "Ask Cadence to build, fix, or explain something…"}
           className="block max-h-60 w-full resize-none bg-transparent px-4 pb-1 pt-3 text-[14.5px] leading-relaxed placeholder:text-faint focus:outline-none"
           disabled={disabled}
         />

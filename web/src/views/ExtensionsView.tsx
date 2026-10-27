@@ -316,7 +316,7 @@ function McpForm({ open, row, onClose, onSaved }: { open: boolean; row: McpRow |
       <Field label="Name"><input className="input font-mono" value={name} onChange={(e) => setName(e.target.value.replace(/[^A-Za-z0-9_-]/g, "-"))} placeholder="filesystem" /></Field>
       <Field label="Command"><input className="input font-mono" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="npx" /></Field>
       <Field label="Arguments" hint="One per line."><textarea className="input min-h-[70px] font-mono text-[12.5px]" value={args} onChange={(e) => setArgs(e.target.value)} placeholder={"-y\n@modelcontextprotocol/server-filesystem\n/home/you/notes"} /></Field>
-      <Field label="Environment" hint="KEY=value, one per line. Stored secrets show as •••; leave them to keep the saved value. Use $NAME to read from Kestrel's environment.">
+      <Field label="Environment" hint="KEY=value, one per line. Stored secrets show as •••; leave them to keep the saved value. Use $NAME to read from Cadence's environment.">
         <textarea className="input min-h-[60px] font-mono text-[12.5px]" value={env} onChange={(e) => setEnv(e.target.value)} placeholder="GITHUB_TOKEN=$GITHUB_TOKEN" />
       </Field>
     </Modal>

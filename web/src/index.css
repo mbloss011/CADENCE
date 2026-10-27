@@ -8,36 +8,36 @@
 /* Colour tokens (RGB triplets so Tailwind can apply alpha). Dark is the default. */
 :root,
 :root[data-theme="dark"] {
-  --bg: 12 13 16;
-  --panel: 19 20 25;
-  --raised: 27 29 36;
-  --line: 42 45 55;
-  --ink: 232 233 237;
-  --muted: 150 154 167;
-  --faint: 98 102 115;
-  --brand: 255 176 0;
-  --flame: 255 106 0;
+  --bg: 10 10 12;
+  --panel: 18 18 21;
+  --raised: 27 26 30;
+  --line: 45 42 47;
+  --ink: 236 234 236;
+  --muted: 156 150 156;
+  --faint: 104 98 104;
+  --brand: 239 51 64;   /* Cadence crimson: the logo's glow */
+  --flame: 150 16 32;   /* deep blood red: gradient end, the logo's shadowed feathers */
   --ok: 52 211 153;
   --warn: 251 191 36;
-  --bad: 248 113 113;
+  --bad: 251 113 133;   /* rose, so errors stay distinct from the brand red */
   --info: 96 165 250;
   --violet: 167 139 250;
   color-scheme: dark;
 }
 
 :root[data-theme="light"] {
-  --bg: 248 247 244;
+  --bg: 247 246 246;
   --panel: 255 255 255;
-  --raised: 242 241 237;
-  --line: 224 222 215;
-  --ink: 24 24 27;
-  --muted: 92 94 104;
-  --faint: 150 150 158;
-  --brand: 214 140 0;
-  --flame: 230 85 0;
+  --raised: 241 239 240;
+  --line: 224 220 222;
+  --ink: 22 20 22;
+  --muted: 94 88 92;
+  --faint: 150 144 148;
+  --brand: 200 24 42;
+  --flame: 120 10 22;
   --ok: 5 150 105;
   --warn: 180 120 0;
-  --bad: 220 38 38;
+  --bad: 219 39 119;
   --info: 37 99 235;
   --violet: 124 58 237;
   color-scheme: light;
@@ -63,13 +63,27 @@ body {
   scrollbar-color: rgb(var(--line)) transparent;
 }
 
+/* The raven is black-and-silver: a red halo keeps it legible on the dark theme, as in the logo. */
+.brand-glow {
+  filter: drop-shadow(0 0 1px rgb(255 255 255 / 0.35)) drop-shadow(0 0 10px rgb(var(--brand) / 0.55));
+}
+:root[data-theme="light"] .brand-glow {
+  filter: drop-shadow(0 0 8px rgb(var(--brand) / 0.35));
+}
+.wordmark {
+  background: linear-gradient(180deg, rgb(var(--ink)) 0%, rgb(var(--ink) / 0.75) 55%, rgb(var(--brand)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition
       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 disabled:cursor-not-allowed disabled:opacity-40;
   }
   .btn-primary {
-    @apply btn bg-brand text-black hover:brightness-110;
+    @apply btn bg-brand text-white shadow-[0_0_18px_-4px_rgb(var(--brand)/0.7)] hover:brightness-110;
   }
   .btn-ghost {
     @apply btn text-muted hover:bg-raised hover:text-ink;

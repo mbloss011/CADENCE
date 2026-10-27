@@ -92,9 +92,10 @@ export default function App() {
   // Open the project's most recent conversation by default; drop a chat that belongs to another project.
   useEffect(() => {
     if (route.view !== "chat") return;
-    const known = store.sessions.some((s) => s.id === route.sid);
+    // a chat created this session (store.chats) counts even before its first message puts it in the list
+    const known = store.sessions.some((s) => s.id === route.sid) || (!!route.sid && store.chats[route.sid] !== undefined);
     if ((!route.sid || (!known && store.sessions.length)) && store.sessions.length) go("chat", store.sessions[0].id);
-  }, [route, store.sessions]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [route, store.sessions, store.chats]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (route.view === "chat" && route.sid && store.chats[route.sid] === undefined && !store.sessions.some((s) => s.id === route.sid)) {

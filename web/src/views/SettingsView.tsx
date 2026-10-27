@@ -20,7 +20,7 @@ export function SettingsView({ status, refreshStatus }: { status: Status | null;
     if (s) {
       setSettings(s);
       refreshStatus();
-      toast(s.restart_required.length ? `${ok}. Restart Kestrel to apply: ${s.restart_required.join(", ")}` : `${ok} and applied`, s.restart_required.length ? "info" : "ok");
+      toast(s.restart_required.length ? `${ok}. Restart Cadence to apply: ${s.restart_required.join(", ")}` : `${ok} and applied`, s.restart_required.length ? "info" : "ok");
     }
     return s;
   };

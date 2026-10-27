@@ -1,4 +1,6 @@
-# Kestrel
+<p align="center"><img src="web/public/cadence-logo.png" alt="Cadence" width="300"></p>
+
+# Cadence
 
 Async, autonomous, local-first coder agent. Claude-Code-style tool use, but built for long-running,
 goal-driven work: an MCP client, Agent Skills, a verify → reflect → retry loop, a heartbeat daemon,
@@ -13,19 +15,22 @@ semantic memory, image understanding, hooks/plugins, sandboxed shell, and Telegr
 
 Both are served through any OpenAI-compatible endpoint (LM Studio default: `http://localhost:1234/v1`).
 
+> The command is `cadence` (`kestrel` still works as an alias). The Python package is still `kestrel`
+> and settings, sessions and memory live in `~/.kestrel/`, so existing installs keep their data.
+
 ## Quick start
 
 ```bash
 pip install -e ".[dev]"
-kestrel doctor                      # checks both models, MCP servers, skills
-kestrel                             # interactive chat (Rich UI)
-kestrel run "add tests for parser.py" --verify "pytest -q"
-kestrel daemon                      # heartbeat + event-driven autonomous mode
-kestrel tasks add "fix flaky auth test" --verify "pytest tests/test_auth.py"
-kestrel goals add "get coverage above 80%" --success "pytest --cov reports >80%"
-kestrel run "match this mockup" --image mockup.png
-kestrel memory search "how do we deploy"   # also: stats | add | reindex
-kestrel inspect plugins                    # also: hooks | tools | skills | mcp
+cadence doctor                      # checks both models, MCP servers, skills
+cadence                             # interactive chat (Rich UI)
+cadence run "add tests for parser.py" --verify "pytest -q"
+cadence daemon                      # heartbeat + event-driven autonomous mode
+cadence tasks add "fix flaky auth test" --verify "pytest tests/test_auth.py"
+cadence goals add "get coverage above 80%" --success "pytest --cov reports >80%"
+cadence run "match this mockup" --image mockup.png
+cadence memory search "how do we deploy"   # also: stats | add | reindex
+cadence inspect plugins                    # also: hooks | tools | skills | mcp
 ```
 
 In chat: `/image <path> [prompt]`, `/memory <query>`, `/plugins`, `/hooks`, `/help` for the rest.
@@ -36,8 +41,8 @@ Config: copy `examples/config.yaml` to `~/.kestrel/config.yaml`. Env overrides: 
 ## Web GUI
 
 ```bash
-kestrel web            # http://127.0.0.1:8765 — also runs the daemon + channels
-kestrel web --open     # and open the browser    ·  --no-daemon / --no-channels / --port N
+cadence web            # http://127.0.0.1:8765 — also runs the daemon + channels
+cadence web --open     # and open the browser    ·  --no-daemon / --no-channels / --port N
 ```
 
 - **Projects** (archive the ones you're done with: hidden from the switcher, no background work, nothing deleted):
@@ -84,15 +89,15 @@ are served with `Content-Security-Policy: sandbox`, so an HTML file the agent wr
 The shared browser needs `pip install "kestrel-agent[browser]"` and Chrome/Chromium (or `playwright install chromium`);
 it runs outside the bash sandbox, with network access.
 Frontend source is in `web/` (React + Vite + Tailwind): `cd web && npm install && npm run build`
-writes to `src/kestrel/web/static/`; `npm run dev` hot-reloads against a running `kestrel web`.
+writes to `src/kestrel/web/static/`; `npm run dev` hot-reloads against a running `cadence web`.
 
 ### CLI equivalents
 
 ```bash
-kestrel goals add "Ship v1 of the billing API" --success "POST /v1/invoices works" --success "docs/api.md exists"
-kestrel goals | goals show <id> | goals pause|resume|archive <id>
-kestrel tasks add "fix the flaky auth test" --verify "pytest -q tests/test_auth.py"
-kestrel ideas | ideas add "..." | ideas promote <id> | ideas dismiss <id>
+cadence goals add "Ship v1 of the billing API" --success "POST /v1/invoices works" --success "docs/api.md exists"
+cadence goals | goals show <id> | goals pause|resume|archive <id>
+cadence tasks add "fix the flaky auth test" --verify "pytest -q tests/test_auth.py"
+cadence ideas | ideas add "..." | ideas promote <id> | ideas dismiss <id>
 ```
 
 ## Architecture
@@ -148,8 +153,8 @@ plugins.py (register(api): tools + hooks)
   Plugins and workspace config run with your privileges — only use ones you trust.
 - **Sandbox** (`sandbox.py`): `bwrap` gives a read-only host, writable workspace, private `/tmp`, hidden
   `$HOME` and optional network cut-off; `docker` runs a throwaway container as your uid. Applies to
-  `bash` and goal verify commands. `kestrel doctor` runs a probe command through it.
-- **Channels** (`channels/`): `kestrel daemon` also starts configured channels. Each chat gets its own
+  `bash` and goal verify commands. `cadence doctor` runs a probe command through it.
+- **Channels** (`channels/`): `cadence daemon` also starts configured channels. Each chat gets its own
   persistent agent session; messages during a running turn steer it; `/task`, `/goal`, `/goals`,
   `/tasks`, `/ideas`, `/approve`, `/stop`, `/new`, `/status` work in chat; photos go to the vision model. Telegram uses long polling
   (no public URL); WhatsApp uses the Meta Cloud API webhook (HMAC-verified) behind a tunnel. An allowlist

@@ -95,7 +95,7 @@ export function ChatView({ sid, status, onNew }: { sid: string | null; status: S
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-5">
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">{sid ? title : "Kestrel"}</div>
+            <div className="truncate text-sm font-medium">{sid ? title : "Cadence"}</div>
             {status && (
               <div className="flex items-center gap-1.5 truncate text-[11px] text-faint">
                 <span className="font-mono">{status.models.big.name}</span>
@@ -228,10 +228,11 @@ function Row({ k, v, ok, warn }: { k: string; v: string; ok?: boolean; warn?: bo
 function Welcome({ status, onPick }: { status: Status | null; onPick: (t: string) => void }) {
   return (
     <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center px-6 py-12">
-      <Logo className="mb-5 h-12 w-12" />
-      <h2 className="text-2xl font-semibold tracking-tight">What should we build?</h2>
+      <Logo className="mb-3 h-28 w-28" />
+      <div className="wordmark mb-4 text-3xl font-bold tracking-tight">Cadence</div>
+      <h2 className="text-xl font-semibold tracking-tight">What should we build?</h2>
       <p className="mt-2 text-center text-sm text-muted">
-        Kestrel reads, edits and runs code in <span className="font-mono text-ink">{status?.workspace.replace(/^\/home\/[^/]+/, "~") ?? "your project"}</span>.
+        Cadence reads, edits and runs code in <span className="font-mono text-ink">{status?.workspace.replace(/^\/home\/[^/]+/, "~") ?? "your project"}</span>.
         Steer it mid-task, interrupt with Esc, drop in a screenshot, or work together on the canvas and in the browser.
       </p>
       <div className="mt-8 grid w-full gap-2 sm:grid-cols-2">
@@ -247,16 +248,5 @@ function Welcome({ status, onPick }: { status: Status | null; onPick: (t: string
 }
 
 export function Logo({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 32 32" className={className} aria-hidden>
-      <defs>
-        <linearGradient id="kg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="rgb(var(--brand))" />
-          <stop offset="1" stopColor="rgb(var(--flame))" />
-        </linearGradient>
-      </defs>
-      <rect width="32" height="32" rx="8" fill="url(#kg)" />
-      <path d="M7 21.5 16 8l3.2 6.4L25 11l-6.6 12.5-3-5.2L7 21.5Z" fill="#111" opacity=".9" />
-    </svg>
-  );
+  return <img src="/cadence-mark.png" alt="Cadence" className={clsx("brand-glow object-contain", className)} draggable={false} />;
 }

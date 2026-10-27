@@ -24,7 +24,7 @@ from .vision import ImageError, user_content
 
 MAX_SUBAGENT_DEPTH = 2
 
-SYSTEM_PROMPT = """You are Kestrel, an autonomous coding agent working inside a local workspace.
+SYSTEM_PROMPT = """You are Cadence, an autonomous coding agent working inside a local workspace.
 
 ## How you work
 - Understand the goal, inspect the code before changing it, make focused edits, then VERIFY by running tests/linters/commands. Never claim success without evidence from a tool result.

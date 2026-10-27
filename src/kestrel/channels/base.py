@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 Reply = Callable[[str], Awaitable[None]]
 
-HELP = """Kestrel commands:
+HELP = """Cadence commands:
 /new — start a fresh session
 /stop — interrupt the running turn
 /task <text> — queue a task for the daemon (verify → reflect → retry)

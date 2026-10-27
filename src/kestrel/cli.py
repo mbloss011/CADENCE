@@ -1,4 +1,4 @@
-"""Kestrel command-line interface (Rich + prompt_toolkit)."""
+"""Cadence command-line interface (Rich + prompt_toolkit). Installed as both `cadence` and `kestrel`."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from .goals import Goal
 from .llm import LLMError, OpenAICompatLLM
 from .runtime import Runtime
 from .tasks import Task
-from .ui import AMBER, Dashboard, TurnRenderer, banner, console, goals_table, ideas_table, long_goals_table, pressure_bar
+from .ui import ACCENT, Dashboard, TurnRenderer, banner, console, goals_table, ideas_table, long_goals_table, pressure_bar
 
 HELP = [
     ("/help", "show this help"),
@@ -90,7 +90,7 @@ async def _command(rt: Runtime, agent: Agent, line: str) -> tuple[Agent, bool]:
     if cmd == "/help":
         table = Table(show_header=False, box=None, padding=(0, 2))
         for k, v in HELP:
-            table.add_row(f"[bold {AMBER}]{k}[/]", v)
+            table.add_row(f"[bold {ACCENT}]{k}[/]", v)
         console.print(table)
     elif cmd == "/tools":
         table = Table(title="tools", border_style="grey35")
@@ -189,7 +189,7 @@ async def _run_goal_live(rt: Runtime, goal: Task) -> None:
         if view:
             view.handle(ev)
 
-    console.print(Panel(f"[bold]{goal.title}[/bold]", title=f"goal {goal.id}", border_style=AMBER))
+    console.print(Panel(f"[bold]{goal.title}[/bold]", title=f"goal {goal.id}", border_style=ACCENT))
     loop = asyncio.get_running_loop()
 
     def interrupt_goal() -> None:
@@ -351,7 +351,7 @@ async def cmd_goals(rt: Runtime, args: argparse.Namespace) -> int:
             console.print("[red]no such goal[/red]")
             return 1
         console.print(Panel(f"{g.description}\n\n[bold]Success:[/bold] " + "; ".join(g.success) + f"\n\n{g.assessment}",
-                            title=f"{g.title} · {g.status} · {g.progress}%", border_style=AMBER))
+                            title=f"{g.title} · {g.status} · {g.progress}%", border_style=ACCENT))
         for e in g.journal[-15:]:
             console.print(f"[dim]{e['kind']:>8}[/dim] {e['text'][:200]}")
         console.print(goals_table(rt.tasks.list(goal=g.id), "tasks for this goal"))
@@ -385,7 +385,7 @@ async def cmd_web(rt: Runtime, args: argparse.Namespace) -> int:
 
     def ready(url: str, token: str | None) -> None:
         banner(rt.cfg.big.name, rt.cfg.small.name, str(rt.cfg.workspace))
-        console.print(Panel(Text(url, style=f"bold {AMBER}"), title="web UI", border_style=AMBER, expand=False))
+        console.print(Panel(Text(url, style=f"bold {ACCENT}"), title="web UI", border_style=ACCENT, expand=False))
         bits = ["daemon on" if not args.no_daemon else "daemon off", f"sandbox {rt.sandbox.mode}",
                 f"{len(rt.cfg.channels)} channel(s)" if rt.cfg.channels and not args.no_channels else "no channels"]
         console.print("[dim]" + " · ".join(bits) + " · Ctrl+C to stop[/dim]")
@@ -573,8 +573,8 @@ def _prompt_session(cfg: Config):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="kestrel", description="Async, autonomous, local-first coder agent.")
-    p.add_argument("--version", action="version", version=f"kestrel {__version__}")
+    p = argparse.ArgumentParser(prog="cadence", description="Cadence: async, autonomous, local-first coder agent.")
+    p.add_argument("--version", action="version", version=f"cadence {__version__}")
     p.add_argument("-w", "--workspace", type=Path, default=None, help="workspace root (default: cwd)")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="command")

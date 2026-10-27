@@ -11,12 +11,12 @@ export function StatusPanel({ status, refresh }: { status: Status | null; refres
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between text-[13px] text-muted">
-        <span>Kestrel {s.version} · <span className="font-mono">{s.workspace}</span></span>
+        <span>Cadence {s.version} · <span className="font-mono">{s.workspace}</span></span>
         <button className="btn-outline" onClick={refresh}><RefreshCw size={14} /> Refresh</button>
       </div>
       {s.restart_required.length > 0 && (
         <div className="rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[13px] text-warn">
-          Restart Kestrel to apply: {s.restart_required.join(", ")}. Saved settings are kept.
+          Restart Cadence to apply: {s.restart_required.join(", ")}. Saved settings are kept.
         </div>
       )}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

@@ -29,7 +29,7 @@ export default {
       },
       boxShadow: {
         card: "0 1px 0 0 rgb(var(--line) / 0.6), 0 8px 24px -12px rgb(0 0 0 / 0.35)",
-        glow: "0 0 0 1px rgb(var(--brand) / 0.35), 0 0 24px -4px rgb(var(--brand) / 0.35)",
+        glow: "0 0 0 1px rgb(var(--brand) / 0.4), 0 0 28px -4px rgb(var(--brand) / 0.45)",
       },
       keyframes: {
         pulseDot: { "0%,100%": { opacity: "0.25" }, "50%": { opacity: "1" } },

@@ -494,7 +494,7 @@ def build_app(rt: Runtime, *, allowed_hosts: set[str] | None = None, token: str 
                                     if "/assets/" in f"/{rel}" else {})
         index = STATIC / "index.html"
         if not index.is_file():
-            return web.Response(text="Kestrel web UI is not built. Run: cd web && npm install && npm run build", status=503)
+            return web.Response(text="Cadence web UI is not built. Run: cd web && npm install && npm run build", status=503)
         return web.FileResponse(index, headers={"Cache-Control": "no-cache"})
 
     app.router.add_get("/", spa)

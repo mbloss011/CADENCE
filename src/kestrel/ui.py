@@ -20,22 +20,22 @@ from .tasks import Task
 
 console = Console(highlight=False)
 
-AMBER, ORANGE, SLATE = "#ffb000", "#ff6a00", "grey58"
+ACCENT, DEEP, SLATE = "#ef3340", "#9f1020", "grey58"  # Cadence crimson + deep red
 STATUS_STYLE = {"proposed": "magenta", "pending": "yellow", "active": "cyan", "done": "green", "failed": "red", "blocked": "dark_orange"}
 
 
 def banner(big: str, small: str, workspace: str) -> None:
     title = Text()
-    title.append("◢◤ ", style=f"bold {ORANGE}")
-    title.append("KESTREL", style="bold bright_white")
+    title.append("▲ ", style=f"bold {ACCENT}")
+    title.append("CADENCE", style="bold bright_white")
     body = Text(justify="center")
     body.append("async · autonomous · local-first coder agent\n", style=SLATE)
     body.append("big ", style=SLATE)
-    body.append(big, style=f"bold {AMBER}")
+    body.append(big, style=f"bold {ACCENT}")
     body.append("   small ", style=SLATE)
     body.append(small, style="bold cyan")
     body.append(f"\n{workspace}", style="dim")
-    console.print(Panel(Align.center(body), title=title, border_style=ORANGE, padding=(1, 4)))
+    console.print(Panel(Align.center(body), title=title, border_style=DEEP, padding=(1, 4)))
 
 
 def pressure_bar(used: int, window: int, width: int = 16) -> Text:
@@ -128,7 +128,7 @@ class TurnRenderer:
         parts: list[RenderableType] = list(self._blocks)
         for call in self._pending.values():
             parts.append(Panel(Syntax(f"{call['name']}({call['args']})", "python", theme="ansi_dark", word_wrap=True),
-                               title="⚙ running…", title_align="left", border_style=AMBER, padding=(0, 1)))
+                               title="⚙ running…", title_align="left", border_style=ACCENT, padding=(0, 1)))
         if self._thinking.strip() and not self._response.strip():
             tail = self._thinking.strip()[-600:]
             parts.append(Panel(Text(tail, style="italic grey50"), title="◌ thinking", title_align="left", border_style="grey30", padding=(0, 1)))
@@ -138,7 +138,7 @@ class TurnRenderer:
         if self._error:
             parts.append(Panel(Text(self._error, style="red"), title="✖ error", border_style="red", padding=(0, 1)))
         if self._interrupted:
-            parts.append(Text("⏹ interrupted — context kept; type to steer or continue", style=f"bold {AMBER}"))
+            parts.append(Text("⏹ interrupted — context kept; type to steer or continue", style=f"bold {ACCENT}"))
         if self._status.plain:
             parts.append(self._status)
         if not parts:
@@ -147,7 +147,7 @@ class TurnRenderer:
 
 
 def goals_table(goals: list[Task], title: str = "goals") -> Table:
-    table = Table(title=title, title_style=f"bold {AMBER}", border_style="grey35", show_lines=False)
+    table = Table(title=title, title_style=f"bold {ACCENT}", border_style="grey35", show_lines=False)
     for col, style in (("id", "cyan"), ("status", None), ("src", "dim"), ("tries", "dim"), ("title", None)):
         table.add_column(col, style=style, no_wrap=col != "title")
     for g in goals:
@@ -156,7 +156,7 @@ def goals_table(goals: list[Task], title: str = "goals") -> Table:
 
 
 def long_goals_table(goals: list[Any], title: str = "goals") -> Table:
-    table = Table(title=title, title_style=f"bold {AMBER}", border_style="grey35")
+    table = Table(title=title, title_style=f"bold {ACCENT}", border_style="grey35")
     for col, style in (("id", "cyan"), ("status", None), ("progress", "dim"), ("title", None)):
         table.add_column(col, style=style, no_wrap=col != "title")
     for g in goals:
@@ -165,7 +165,7 @@ def long_goals_table(goals: list[Any], title: str = "goals") -> Table:
 
 
 def ideas_table(ideas: list[Any], title: str = "idea inbox") -> Table:
-    table = Table(title=title, title_style=f"bold {AMBER}", border_style="grey35")
+    table = Table(title=title, title_style=f"bold {ACCENT}", border_style="grey35")
     for col, style in (("id", "cyan"), ("size", "dim"), ("src", "dim"), ("title", None)):
         table.add_column(col, style=style, no_wrap=col != "title")
     for i in ideas:

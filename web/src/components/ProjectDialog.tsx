@@ -4,7 +4,7 @@ import { api, type Project } from "../lib/api";
 import { useStore } from "../lib/store";
 import { act, Busy, ConfirmButton, Field, Modal, toast } from "./ui";
 
-const COLORS = ["#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7", "#6366f1", "#3b82f6", "#06b6d4", "#10b981", "#84cc16"];
+const COLORS = ["#ef3340", "#9f1020", "#f97316", "#f59e0b", "#ec4899", "#a855f7", "#6366f1", "#3b82f6", "#06b6d4", "#10b981", "#84cc16"];
 
 export function ProjectDialog({ open, onClose, project }: { open: boolean; onClose: () => void; project?: Project }) {
   const store = useStore();

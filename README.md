@@ -13,7 +13,8 @@ any OpenAI-compatible server) and is built for work that spans days, not just si
   Chromium you can watch and take over.
 - **Reads any file**: PDF, Word, PowerPoint, Excel/CSV, JSON/YAML, notebooks, databases, archives, images
   and code, as text or through the vision model.
-- **Extensible from the UI**: skills, Python plugins, MCP servers and hooks, all hot-reloaded.
+- **Extensible from the UI**: skills (with references, scripts and assets), Python plugins, MCP servers and
+  hooks, all hot-reloaded.
 - **Safe by default**: sandboxed shell (bubblewrap or Docker), loopback-only web server, verify commands
   that outrank the model's opinion.
 
@@ -79,9 +80,9 @@ The web app is the main interface. A terminal UI is there too: `cadence` (chat),
 - **Ideas**: an inbox the daemon fills on its heartbeat (or **Brainstorm** on demand). Edit, dismiss, delete, or
   promote to a task or a goal. Nothing runs until promoted, unless `auto_approve_ideas` is on.
 - **Memory**: semantic search; add and forget memories.
-- **Extensions**: create, edit, enable/disable and delete skills (or import a folder/URL), Python plugins
-  (reloaded on save), MCP servers (or paste a Claude Desktop `mcpServers` block) and hooks (with a Test
-  button). Changes reach chats that are already running.
+- **Extensions**: skills (see [Skills](#skills)), Python plugins (reloaded on save), MCP servers (or paste a
+  Claude Desktop `mcpServers` block) and hooks (with a Test button). Create, edit, enable/disable and delete
+  each; changes reach chats that are already running.
 - **Settings**: model roles from a live scan of your servers, per-model parameters, agent and daemon limits,
   sandbox, memory, browser, projects and system status. Applied immediately and kept across restarts; theme
   and active project follow you between browsers.
@@ -102,6 +103,38 @@ Attach any file in chat, or let the agent find it in the project. Attachments ar
 
 The agent's tools: `read_file` (with `pages=`, `sheet=` and `structured=true`), and `view_image` for any image
 or any page of a PDF or Office document, for charts, layouts and scanned pages.
+
+## Skills
+
+A skill is a folder, following the [Agent Skills](https://agentskills.io) layout:
+
+```
+pdf-forms/
+├── SKILL.md        frontmatter (name, description; optional license, compatibility, allowed-tools, metadata) + instructions
+├── references/     docs the agent reads only when a step needs them
+├── scripts/        code the agent runs instead of rewriting it
+└── assets/         templates, images and fonts used in outputs
+```
+
+Only each skill's name and description sit in the prompt. When a task matches, the agent calls `load_skill`,
+which returns the instructions plus an index of the bundled files, then uses:
+
+| Tool | For |
+|---|---|
+| `read_skill_file(skill, path)` | references and other docs (PDFs and Office files are converted to text) |
+| `run_skill_script(skill, script, args)` | scripts, run in the sandbox with the project as working directory, the skill folder mounted read-only and `$SKILL_DIR` set; the interpreter comes from the extension (`.py .sh .js .ts .rb …`) |
+| `use_skill_asset(skill, path, dest)` | copying a template or asset into the project to use or edit |
+
+Skills live in `~/.cadence/skills/` (all projects) or `<project>/.cadence/skills/` (one project). Install them
+from **Extensions → Skills**:
+- **Upload** a `.zip` / `.skill` archive or a whole folder (drag and drop works).
+- **Import** from a GitHub folder (`https://github.com/anthropics/skills/tree/main/skills/pdf`) or repository,
+  an https link to a `.zip` or raw `SKILL.md`, or a local folder / `.zip` / `SKILL.md`.
+
+Every folder containing a `SKILL.md` is installed with its references, scripts and assets. Archives are checked
+before anything is written: paths that escape the folder, symlinks, `__MACOSX` junk and oversized bundles are
+rejected, and frontmatter is validated. Each skill opens in a file manager to browse, edit, add, upload and delete
+files, and downloads as a `.zip` to share.
 
 ## Command line
 
@@ -199,8 +232,10 @@ channels/ (Telegram, WhatsApp) ──► agents
 - **Memory** (`memory.py`): JSONL is the source of truth; vectors are indexed lazily into a local sidecar or
   Qdrant. Retrieval blends cosine similarity (above a `min_similarity` floor) with keyword overlap and
   recency, and falls back to keywords if the embedder is down.
-- **Skills**: `<dir>/<name>/SKILL.md` with `name`/`description` frontmatter. Only the index is in the prompt;
-  `load_skill` loads the body on demand. `AGENTS.md` and `SOUL.md` in a project are read too.
+- **Skills** (`skills.py`): progressive disclosure: name + description in the prompt, `load_skill` for the
+  instructions and resource index, then `read_skill_file` / `run_skill_script` / `use_skill_asset` on demand.
+  Scripts get a per-call read-only mount of their skill folder, so they work even though the sandbox hides
+  `$HOME`. `AGENTS.md` and `SOUL.md` in a project are read too.
 - **Hooks** (`hooks.py`): `session_start`, `user_prompt`, `pre_tool`, `post_tool`, `stop`, `task_done`,
   `goal_achieved`. Same protocol as Claude Code: JSON on stdin; exit 0 adds stdout as context; exit 2
   blocks, with stderr as the reason.
@@ -214,7 +249,7 @@ channels/ (Telegram, WhatsApp) ──► agents
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 81 tests
+pytest -q                       # 87 tests
 cd web && npm install && npm run dev     # hot-reloading UI against a running `cadence web`
 cd web && npm run build                  # writes the production UI to src/cadence/web/static/
 ```
@@ -222,7 +257,8 @@ cd web && npm run build                  # writes the production UI to src/caden
 The tests cover the agent loop, compaction, tasks, goals and the planner, ideas, projects and archiving, the
 daemon, MCP (including hot add/remove), vector memory (local and Qdrant), hooks, plugins (live reload),
 skills, settings, the sandbox, Telegram, WhatsApp, the web API and WebSocket, files, canvas, any-file
-extraction, the Kestrel migration and the shared browser (in real Chrome). Tests never touch your real
+extraction, skill installing and skill tools (including scripts inside bwrap), the Kestrel migration and the
+shared browser (in real Chrome). Tests never touch your real
 `~/.cadence`.
 
 ## Limits

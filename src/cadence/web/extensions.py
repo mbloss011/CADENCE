@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 from dataclasses import asdict, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,7 +22,8 @@ from ..config import ENV_LOCKS, HookConfig, ModelConfig, read_settings
 from ..hooks import EVENTS, Hooks
 from ..llm import discover_models
 from ..sandbox import MODES
-from ..skills import SkillRegistry
+from ..skills import NAME_RE as SKILL_NAME_RE, RESOURCE_DIRS, SKIP_NAMES as SKIP_SKILL_NAMES, Skill, SkillError, SkillRegistry, \
+    _safe_rel, export_zip, github_zip_url, parse_skill, read_dir, read_zip, subtree, unpack
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
@@ -29,6 +31,7 @@ if TYPE_CHECKING:
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 MAX_SKILL_BYTES = 256 * 1024
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 PLUGIN_TEMPLATE = '''"""{name}: a Cadence plugin. Edit and save; it reloads immediately."""
 
@@ -54,7 +57,16 @@ description: {description}
 
 # {title}
 
-Describe when to use this skill and the steps to follow.
+## When to use
+Describe the situations where this skill applies.
+
+## Steps
+1. …
+
+## Resources
+- `references/`: background docs. Read with `read_skill_file` only when a step needs them.
+- `scripts/`: helpers. Run with `run_skill_script` instead of rewriting them.
+- `assets/`: templates and files for outputs. Copy into the project with `use_skill_asset`.
 """
 
 
@@ -169,6 +181,9 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
     def user_skill_dir() -> Path:
         return cfg.home / "skills"
 
+    def skill_base(scope: str, project: str) -> Path:
+        return user_skill_dir() if scope != "project" else rt.scope(project).project.root / ".cadence" / "skills"
+
     def scope_skills(req: web.Request) -> tuple[SkillRegistry, Path]:
         sc = rt.scope(req.query.get("project", ""))
         sc.skills.scan()
@@ -178,11 +193,35 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
         root = path.resolve()
         return any(base.resolve() in root.parents for base in (user_skill_dir(), project_dir))
 
-    def skill_dict(s: Any, reg: SkillRegistry, project_dir: Path) -> dict[str, Any]:
+    def skill_dict(s: Skill, reg: SkillRegistry, project_dir: Path) -> dict[str, Any]:
         where = "project" if project_dir.resolve() in s.path.resolve().parents else \
             "user" if user_skill_dir().resolve() in s.path.resolve().parents else "other"
-        return {"name": s.name, "description": s.description, "path": str(s.path), "scope": where,
-                "enabled": s.name not in cfg.disabled_skills, "editable": writable(s.path, project_dir), "files": s.files}
+        g = s.grouped()
+        return {"name": s.name, "description": s.description, "path": str(s.path), "root": str(s.root), "scope": where,
+                "enabled": s.name not in cfg.disabled_skills, "editable": writable(s.path, project_dir), "files": s.files,
+                "counts": {k: len(v) for k, v in g.items()}, "meta": {k: str(v) for k, v in s.meta.items()}, "warnings": s.warnings}
+
+    def editable_skill(req: web.Request) -> tuple[Skill, SkillRegistry, Path]:
+        reg, pdir = scope_skills(req)
+        s = reg.found.get(req.match_info["name"])
+        if not s:
+            raise web.HTTPNotFound(text="no such skill")
+        return s, reg, pdir
+
+    def must_write(s: Skill, pdir: Path) -> None:
+        if not writable(s.path, pdir):
+            raise web.HTTPForbidden(text=f"{s.root} is outside the editable skill folders (~/.cadence/skills, <project>/.cadence/skills)")
+
+    def inside(s: Skill, rel: str) -> Path:
+        try:
+            return s.resolve(rel)
+        except SkillError as exc:
+            raise web.HTTPForbidden(text=str(exc))
+
+    async def installed(names: list[str], base: Path) -> web.Response:
+        rt.reload_skills()
+        await changed("skills")
+        return web.json_response({"ok": True, "installed": names, "base": str(base)})
 
     @r.get("/api/skills")
     async def skills(req: web.Request) -> web.Response:
@@ -192,15 +231,12 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
 
     @r.get("/api/skills/{name}")
     async def skill_source(req: web.Request) -> web.Response:
-        reg, pdir = scope_skills(req)
-        s = reg.found.get(req.match_info["name"])
-        if not s:
-            raise web.HTTPNotFound(text="no such skill")
+        s, reg, pdir = editable_skill(req)
         return web.json_response({**skill_dict(s, reg, pdir), "content": s.path.read_text(encoding="utf-8")})
 
     def check_skill(path: Path) -> str:
         try:
-            SkillRegistry._parse(path)
+            parse_skill(path)
         except Exception as exc:  # noqa: BLE001
             return str(exc)
         return ""
@@ -209,33 +245,30 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
     async def create_skill(req: web.Request) -> web.Response:
         data = await body(req)
         name = str(data.get("name", "")).strip().lower()
-        if not NAME_RE.match(name):
-            raise web.HTTPBadRequest(text="name: lowercase letters, digits, - and _ (max 64)")
+        if not SKILL_NAME_RE.match(name) or len(name) > 64:
+            raise web.HTTPBadRequest(text="name: lowercase letters, digits and single hyphens (max 64), e.g. pdf-forms")
         description = str(data.get("description", "")).strip().replace("\n", " ")
         if not description:
             raise web.HTTPBadRequest(text="a description is required: it is how the agent decides to use the skill")
-        base = user_skill_dir() if data.get("scope", "user") == "user" else rt.scope(str(data.get("project", ""))).project.root / ".cadence" / "skills"
-        target = base / name / "SKILL.md"
-        if target.exists():
-            raise web.HTTPConflict(text=f"{target} already exists")
+        base = skill_base(str(data.get("scope", "user")), str(data.get("project", "")))
+        root = base / name
+        if root.exists():
+            raise web.HTTPConflict(text=f"{root} already exists")
         content = str(data.get("content", "")) or SKILL_TEMPLATE.format(name=name, description=description, title=name.replace("-", " ").title())
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        if err := check_skill(target):
-            shutil.rmtree(target.parent)
+        root.mkdir(parents=True)
+        (root / "SKILL.md").write_text(content, encoding="utf-8")
+        for folder in data.get("folders", RESOURCE_DIRS) or []:
+            if folder in RESOURCE_DIRS:
+                (root / folder).mkdir(exist_ok=True)
+        if err := check_skill(root / "SKILL.md"):
+            shutil.rmtree(root)
             raise web.HTTPBadRequest(text=f"invalid SKILL.md: {err}")
-        rt.reload_skills()
-        await changed("skills")
-        return web.json_response({"ok": True, "path": str(target)})
+        return await installed([name], base)
 
     @r.put("/api/skills/{name}")
     async def save_skill(req: web.Request) -> web.Response:
-        reg, pdir = scope_skills(req)
-        s = reg.found.get(req.match_info["name"])
-        if not s:
-            raise web.HTTPNotFound(text="no such skill")
-        if not writable(s.path, pdir):
-            raise web.HTTPForbidden(text=f"{s.path} is outside the editable skill folders")
+        s, _reg, pdir = editable_skill(req)
+        must_write(s, pdir)
         content = str((await body(req)).get("content", ""))
         if len(content.encode()) > MAX_SKILL_BYTES:
             raise web.HTTPBadRequest(text="SKILL.md is too large")
@@ -250,13 +283,10 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
 
     @r.delete("/api/skills/{name}")
     async def delete_skill(req: web.Request) -> web.Response:
-        reg, pdir = scope_skills(req)
-        s = reg.found.get(req.match_info["name"])
-        if not s:
-            raise web.HTTPNotFound(text="no such skill")
+        s, _reg, pdir = editable_skill(req)
         if not writable(s.path, pdir):
             raise web.HTTPForbidden(text=f"{s.path} is outside the editable skill folders; disable it instead")
-        shutil.rmtree(s.path.parent)
+        shutil.rmtree(s.root)
         rt.reload_skills()
         await changed("skills")
         return web.json_response({"ok": True})
@@ -270,50 +300,169 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
         await changed("skills")
         return web.json_response({"ok": True, "disabled": disabled})
 
-    @r.post("/api/skills-import")
-    async def import_skill(req: web.Request) -> web.Response:
-        """From a local folder containing SKILL.md, or an http(s) URL of a raw SKILL.md."""
+    # files inside a skill: references/, scripts/, assets/ …
+    @r.get("/api/skills/{name}/files")
+    async def skill_files(req: web.Request) -> web.Response:
+        s, _reg, _pdir = editable_skill(req)
+        out = []
+        for p in sorted(s.root.rglob("*")):
+            rel = p.relative_to(s.root)
+            if any(part in SKIP_SKILL_NAMES for part in rel.parts):
+                continue
+            out.append({"path": rel.as_posix(), "dir": p.is_dir(), "size": p.stat().st_size if p.is_file() else 0,
+                        "exec": p.is_file() and os.access(p, os.X_OK)})
+        return web.json_response(out)
+
+    @r.get("/api/skills/{name}/file")
+    async def skill_file(req: web.Request) -> web.StreamResponse:
+        s, _reg, _pdir = editable_skill(req)
+        p = inside(s, req.query.get("path", ""))
+        if not p.is_file():
+            raise web.HTTPNotFound(text="no such file")
+        if req.query.get("raw"):
+            return web.FileResponse(p, headers={"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff",
+                                                "Content-Disposition": f'attachment; filename="{p.name}"'})
+        raw = p.read_bytes()
+        from ..documents import is_text
+        if len(raw) > MAX_SKILL_BYTES * 8 or not is_text(raw):
+            return web.json_response({"path": req.query.get("path"), "binary": True, "size": len(raw)})
+        return web.json_response({"path": req.query.get("path"), "binary": False, "size": len(raw),
+                                  "content": raw.decode("utf-8", "replace")})
+
+    @r.put("/api/skills/{name}/file")
+    async def save_skill_file(req: web.Request) -> web.Response:
+        s, _reg, pdir = editable_skill(req)
+        must_write(s, pdir)
         data = await body(req)
-        src = str(data.get("source", "")).strip()
-        base = user_skill_dir() if data.get("scope", "user") == "user" else rt.scope(str(data.get("project", ""))).project.root / ".cadence" / "skills"
-        tmp = base / f".import-{os.getpid()}"
-        shutil.rmtree(tmp, ignore_errors=True)
-        try:
-            if src.startswith(("http://", "https://")):
-                async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-                    resp = await client.get(src)
-                    resp.raise_for_status()
-                    if len(resp.content) > MAX_SKILL_BYTES:
-                        raise web.HTTPBadRequest(text="that file is too large to be a SKILL.md")
-                tmp.mkdir(parents=True)
-                (tmp / "SKILL.md").write_bytes(resp.content)
-            else:
-                folder = Path(src).expanduser()
-                if folder.is_file() and folder.name == "SKILL.md":
-                    folder = folder.parent
-                if not (folder / "SKILL.md").is_file():
-                    raise web.HTTPBadRequest(text=f"no SKILL.md in {folder}")
-                shutil.copytree(folder, tmp, ignore=shutil.ignore_patterns(".git", "node_modules", "__pycache__"))
-            import yaml
-            text = (tmp / "SKILL.md").read_text(encoding="utf-8")
-            meta = yaml.safe_load(text.split("---")[1]) if text.startswith("---") else {}
-            name = str((meta or {}).get("name", "")).strip()
-            if not NAME_RE.match(name):
-                raise web.HTTPBadRequest(text="SKILL.md frontmatter needs a valid 'name'")
-            dest = base / name
-            if dest.exists():
-                raise web.HTTPConflict(text=f"a skill named '{name}' already exists in {base}")
-            tmp.rename(dest)
-            if err := check_skill(dest / "SKILL.md"):
-                shutil.rmtree(dest)
-                raise web.HTTPBadRequest(text=f"invalid SKILL.md: {err}")
-        except httpx.HTTPError as exc:
-            raise web.HTTPBadGateway(text=f"download failed: {exc}")
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+        rel = str(data.get("path", "")).strip()
+        p = inside(s, rel)
+        if p == s.root or p.is_dir():
+            raise web.HTTPBadRequest(text="give a file path, e.g. references/api.md")
+        content = str(data.get("content", ""))
+        if p == s.path:
+            old = p.read_text(encoding="utf-8")
+            p.write_text(content, encoding="utf-8")
+            if err := check_skill(p):
+                p.write_text(old, encoding="utf-8")
+                raise web.HTTPBadRequest(text=f"not saved, invalid SKILL.md: {err}")
+        else:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+            if p.relative_to(s.root).parts[0] == "scripts" or content.startswith("#!"):
+                p.chmod(p.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
         rt.reload_skills()
         await changed("skills")
-        return web.json_response({"ok": True, "name": name})
+        return web.json_response({"ok": True})
+
+    @r.delete("/api/skills/{name}/file")
+    async def delete_skill_file(req: web.Request) -> web.Response:
+        s, _reg, pdir = editable_skill(req)
+        must_write(s, pdir)
+        p = inside(s, req.query.get("path", ""))
+        if p in (s.root, s.path):
+            raise web.HTTPBadRequest(text="SKILL.md and the skill folder itself cannot be deleted here")
+        if not p.exists():
+            raise web.HTTPNotFound(text="no such file")
+        shutil.rmtree(p) if p.is_dir() else p.unlink()
+        rt.reload_skills()
+        await changed("skills")
+        return web.json_response({"ok": True})
+
+    @r.post("/api/skills/{name}/upload")
+    async def upload_skill_files(req: web.Request) -> web.Response:
+        """Add files to a skill folder (e.g. dir=assets). Relative paths in the filenames are kept."""
+        s, _reg, pdir = editable_skill(req)
+        must_write(s, pdir)
+        folder = req.query.get("dir", "")
+        saved = []
+        reader = await req.multipart()
+        while (part := await reader.next()) is not None:
+            if not part.filename:
+                continue
+            rel = _safe_rel(part.filename)
+            if rel is None:
+                continue
+            p = inside(s, f"{folder}/{rel.as_posix()}" if folder else rel.as_posix())
+            data = await part.read(decode=False)
+            if len(data) > MAX_UPLOAD_BYTES:
+                raise web.HTTPRequestEntityTooLarge(max_size=MAX_UPLOAD_BYTES, actual_size=len(data))
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(data)
+            if p.relative_to(s.root).parts[0] == "scripts" or data[:2] == b"#!":
+                p.chmod(p.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
+            saved.append(p.relative_to(s.root).as_posix())
+        rt.reload_skills()
+        await changed("skills")
+        return web.json_response({"ok": True, "saved": saved})
+
+    @r.get("/api/skills/{name}/export")
+    async def export_skill(req: web.Request) -> web.Response:
+        s, _reg, _pdir = editable_skill(req)
+        return web.Response(body=export_zip(s), content_type="application/zip",
+                            headers={"Content-Disposition": f'attachment; filename="{s.name}.zip"'})
+
+    # installing whole skills
+    @r.post("/api/skills-upload")
+    async def upload_skill(req: web.Request) -> web.Response:
+        """A .zip / .skill archive, or the files of a folder (filenames carry their relative paths)."""
+        base = skill_base(req.query.get("scope", "user"), req.query.get("project", ""))
+        files: dict[Path, bytes] = {}
+        reader = await req.multipart()
+        total = 0
+        while (part := await reader.next()) is not None:
+            if not part.filename:
+                continue
+            data = await part.read(decode=False)
+            total += len(data)
+            if total > MAX_UPLOAD_BYTES:
+                raise web.HTTPRequestEntityTooLarge(max_size=MAX_UPLOAD_BYTES, actual_size=total)
+            if part.filename.lower().endswith((".zip", ".skill")):
+                files.update(read_zip(data))
+            elif (rel := _safe_rel(part.filename)) is not None:
+                files[rel] = data
+        base.mkdir(parents=True, exist_ok=True)
+        try:
+            names = unpack(files, base, overwrite=req.query.get("overwrite") == "1")
+        except SkillError as exc:
+            raise web.HTTPConflict(text=str(exc)) if "already exists" in str(exc) else web.HTTPBadRequest(text=str(exc))
+        return await installed(names, base)
+
+    @r.post("/api/skills-import")
+    async def import_skill(req: web.Request) -> web.Response:
+        """From a local folder (or SKILL.md / .zip in it), a GitHub folder URL, or an https URL to a .zip or SKILL.md."""
+        data = await body(req)
+        src = str(data.get("source", "")).strip()
+        base = skill_base(str(data.get("scope", "user")), str(data.get("project", "")))
+        base.mkdir(parents=True, exist_ok=True)
+        try:
+            if src.startswith(("http://", "https://")):
+                gh = github_zip_url(src) if "github.com/" in src and not src.endswith((".zip", ".skill")) else None
+                url = gh[0] if gh else src
+                async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                content = resp.content
+                if len(content) > MAX_UPLOAD_BYTES:
+                    raise web.HTTPBadRequest(text="download too large to be a skill")
+                if gh or url.lower().endswith((".zip", ".skill")) or content[:2] == b"PK":
+                    files = subtree(read_zip(content), gh[1]) if gh else read_zip(content)
+                else:
+                    files = {Path("SKILL.md"): content}
+            else:
+                path = Path(src).expanduser()
+                if path.is_file() and path.suffix.lower() in (".zip", ".skill"):
+                    files = read_zip(path.read_bytes())
+                else:
+                    folder = path.parent if path.is_file() and path.name == "SKILL.md" else path
+                    if not folder.is_dir():
+                        raise web.HTTPBadRequest(text=f"{folder} is not a folder, .zip or SKILL.md")
+                    files = read_dir(folder)
+            names = unpack(files, base, overwrite=bool(data.get("overwrite")))
+        except httpx.HTTPError as exc:
+            raise web.HTTPBadGateway(text=f"download failed: {exc}")
+        except SkillError as exc:
+            raise web.HTTPConflict(text=str(exc)) if "already exists" in str(exc) else web.HTTPBadRequest(text=str(exc))
+        return await installed(names, base)
 
     # ─────────────────────────────────────────────────────────── plugins
     def plugin_dir() -> Path:

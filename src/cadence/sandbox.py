@@ -55,8 +55,10 @@ class Sandbox:
                 return "snap-packaged docker cannot see /tmp (it has a private /tmp); move the workspace or use bwrap"
         return ""
 
-    def argv(self, command: str, name: str = "") -> list[str]:
+    def argv(self, command: str, name: str = "", ro: list[str] | None = None, env: dict[str, str] | None = None) -> list[str]:
+        """`ro`: extra paths mounted read-only for this call only (e.g. a skill's folder under the hidden $HOME)."""
         ws = str(self.workspace)
+        extra = [str(Path(p).expanduser().resolve()) for p in ro or []]
         if self.mode == "none":
             return ["bash", "-c", command]
         if self.mode == "bwrap":
@@ -70,6 +72,8 @@ class Sandbox:
             for p in self.cfg.ro_binds:
                 p = str(Path(p).expanduser().resolve())
                 args += ["--ro-bind-try", p, p]
+            for p in extra:  # after the $HOME / /tmp tmpfs layers, so they show through them
+                args += ["--ro-bind", p, p]
             args += ["--bind", ws, ws]
             for p in self.cfg.rw_binds:
                 p = str(Path(p).expanduser().resolve())
@@ -80,22 +84,23 @@ class Sandbox:
                 "-v", f"{ws}:{ws}", "-w", ws, "-e", "HOME=/tmp", "--user", f"{os.getuid()}:{os.getgid()}"]
         if not self.cfg.network:
             args += ["--network", "none"]
-        for p in self.cfg.ro_binds:
-            p = str(Path(p).expanduser().resolve())
+        for p in [*(str(Path(x).expanduser().resolve()) for x in self.cfg.ro_binds), *extra]:
             args += ["-v", f"{p}:{p}:ro"]
+        for k, v in (env or {}).items():  # docker does not inherit the caller's environment
+            args += ["-e", f"{k}={v}"]
         for p in self.cfg.rw_binds:
             p = str(Path(p).expanduser().resolve())
             args += ["-v", f"{p}:{p}"]
         return args + [self.cfg.image, "bash", "-c", command]
 
-    async def run(self, command: str, timeout: float, env: dict[str, str] | None = None) -> ShellResult:
+    async def run(self, command: str, timeout: float, env: dict[str, str] | None = None, ro: list[str] | None = None) -> ShellResult:
         """Run `command`; kills the whole process group (and container) on timeout or cancellation."""
         reason = self.check()
         if reason:
             raise SandboxError(reason)
         name = f"cadence-sbx-{uuid.uuid4().hex[:10]}"
         proc = await asyncio.create_subprocess_exec(
-            *self.argv(command, name),
+            *self.argv(command, name, ro, env),
             cwd=self.workspace,
             env={**os.environ, **(env or {})},
             stdout=asyncio.subprocess.PIPE,

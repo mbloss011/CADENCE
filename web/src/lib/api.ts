@@ -177,7 +177,11 @@ export type Discovery = {
   current: Record<"big" | "small" | "embed", { name: string; base_url: string }> & { vision: { name: string; base_url: string } | null };
 };
 
-export type SkillRow = { name: string; description: string; path: string; scope: "user" | "project" | "other"; enabled: boolean; editable: boolean; files: string[] };
+export type SkillRow = {
+  name: string; description: string; path: string; root: string; scope: "user" | "project" | "other"; enabled: boolean; editable: boolean;
+  files: string[]; counts: { references: number; scripts: number; assets: number; other: number }; meta: Record<string, string>; warnings: string[];
+};
+export type SkillFile = { path: string; dir: boolean; size: number; exec: boolean };
 export type PluginRow = { name: string; origin: string; enabled: boolean; loaded: boolean; tools: string[]; hooks: number; error: string; editable: boolean; path: string };
 export type McpRow = { name: string; command: string; args: string[]; env: Record<string, string>; enabled: boolean; connected: boolean; tools: string[]; error: string };
 export type HookRow = { event: string; command: string; matcher: string; timeout: number };
@@ -297,13 +301,33 @@ export const api = {
   // extensions
   skills: (project: string) => req<{ skills: SkillRow[]; errors: string[]; dirs: string[] }>(`/api/skills?${q({ project })}`),
   skill: (name: string, project: string) => req<SkillRow & { content: string }>(`/api/skills/${name}?${q({ project })}`),
-  createSkill: (s: { name: string; description: string; scope: "user" | "project"; project: string; content?: string }) =>
+  createSkill: (s: { name: string; description: string; scope: "user" | "project"; project: string; content?: string; folders?: string[] }) =>
     req<{ ok: boolean; path: string }>("/api/skills", json("POST", s)),
   saveSkill: (name: string, project: string, content: string) => req<{ ok: boolean }>(`/api/skills/${name}?${q({ project })}`, json("PUT", { content })),
   deleteSkill: (name: string, project: string) => req<{ ok: boolean }>(`/api/skills/${name}?${q({ project })}`, { method: "DELETE" }),
   toggleSkill: (name: string, enabled: boolean) => req<{ ok: boolean }>(`/api/skills/${name}/toggle`, json("POST", { enabled })),
-  importSkill: (source: string, scope: "user" | "project", project: string) =>
-    req<{ ok: boolean; name: string }>("/api/skills-import", json("POST", { source, scope, project })),
+  importSkill: (source: string, scope: "user" | "project", project: string, overwrite = false) =>
+    req<{ ok: boolean; installed: string[] }>("/api/skills-import", json("POST", { source, scope, project, overwrite })),
+  uploadSkill: (files: File[], scope: "user" | "project", project: string, overwrite = false) => {
+    const fd = new FormData();
+    // a folder pick keeps relative paths (skill-name/references/x.md) so the layout survives
+    files.forEach((f) => fd.append("file", f, (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name));
+    return req<{ ok: boolean; installed: string[] }>(`/api/skills-upload?${q({ scope, project, overwrite: overwrite ? "1" : undefined })}`, { method: "POST", body: fd });
+  },
+  skillFiles: (name: string, project: string) => req<SkillFile[]>(`/api/skills/${name}/files?${q({ project })}`),
+  skillFile: (name: string, project: string, path: string) =>
+    req<{ path: string; binary: boolean; size: number; content?: string }>(`/api/skills/${name}/file?${q({ project, path })}`),
+  skillFileUrl: (name: string, project: string, path: string) => `/api/skills/${name}/file?${q({ project, path, raw: "1" })}`,
+  saveSkillFile: (name: string, project: string, path: string, content: string) =>
+    req<{ ok: boolean }>(`/api/skills/${name}/file?${q({ project })}`, json("PUT", { path, content })),
+  deleteSkillFile: (name: string, project: string, path: string) =>
+    req<{ ok: boolean }>(`/api/skills/${name}/file?${q({ project, path })}`, { method: "DELETE" }),
+  uploadSkillFiles: (name: string, project: string, dir: string, files: File[]) => {
+    const fd = new FormData();
+    files.forEach((f) => fd.append("file", f, f.name));
+    return req<{ ok: boolean; saved: string[] }>(`/api/skills/${name}/upload?${q({ project, dir })}`, { method: "POST", body: fd });
+  },
+  skillExportUrl: (name: string, project: string) => `/api/skills/${name}/export?${q({ project })}`,
   plugins: () => req<{ plugins: PluginRow[]; dirs: string[] }>("/api/plugins"),
   createPlugin: (name: string) => req<{ ok: boolean; plugins: PluginRow[] }>("/api/plugins", json("POST", { name })),
   pluginSource: (name: string) => req<{ path: string; source: string }>(`/api/plugins/${name}/source`),

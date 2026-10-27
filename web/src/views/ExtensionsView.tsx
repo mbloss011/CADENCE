@@ -2,7 +2,8 @@ import clsx from "clsx";
 import { Box, Download, FlaskConical, Pencil, Play, Plug, Plus, Puzzle, RefreshCw, Save, Webhook, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { act, Busy, CodeEditor, ConfirmButton, Dot, Empty, Field, Modal, PageHeader, Tabs, toast, Toggle } from "../components/ui";
-import { api, type HookRow, type Hooks, type McpRow, type PluginRow, type SkillRow } from "../lib/api";
+import { SkillsTab } from "../components/SkillsTab";
+import { api, type HookRow, type Hooks, type McpRow, type PluginRow } from "../lib/api";
 import { useLive, useStore } from "../lib/store";
 
 type Tab = "skills" | "plugins" | "mcp" | "hooks";
@@ -34,119 +35,6 @@ export function ExtensionsView() {
 
 function Row({ children, dim }: { children: React.ReactNode; dim?: boolean }) {
   return <div className={clsx("card flex items-start gap-3 p-3.5", dim && "opacity-60")}>{children}</div>;
-}
-
-// ──────────────────────────────────────────────────────────────── skills
-function SkillsTab() {
-  const { project } = useStore();
-  const [data, setData] = useState<{ skills: SkillRow[]; errors: string[]; dirs: string[] }>();
-  const [edit, setEdit] = useState<{ name: string; content: string; path: string } | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const load = useCallback(() => api.skills(project).then(setData).catch(() => undefined), [project]);
-  useEffect(() => void load(), [load]);
-  useLive(["changed"], (m) => m.what === "skills" && load());
-
-  const openEditor = async (name: string) => {
-    const s = await act(() => api.skill(name, project));
-    if (s) setEdit({ name, content: s.content, path: s.path });
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <p className="flex-1 text-[13px] text-muted">
-          A skill is a <span className="font-mono">SKILL.md</span> playbook. The agent sees each skill's name and description and loads the full text when a task matches.
-        </p>
-        <button className="btn-outline" onClick={() => setImporting(true)}><Download size={14} /> Import</button>
-        <button className="btn-primary" onClick={() => setCreating(true)}><Plus size={14} /> New skill</button>
-      </div>
-      {data?.errors.map((e) => <div key={e} className="rounded-lg border border-bad/40 bg-bad/10 px-3 py-2 text-[12.5px] text-bad">{e}</div>)}
-      {data && data.skills.length === 0 && <Empty icon={<Box size={18} />} title="No skills yet">Create one here, or import a folder that contains a SKILL.md.</Empty>}
-      {data?.skills.map((s) => (
-        <Row key={s.name} dim={!s.enabled}>
-          <Box size={16} className="mt-0.5 shrink-0 text-brand" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-[13.5px] font-medium">{s.name}
-              <span className="chip border-line text-faint">{s.scope === "project" ? "this project" : s.scope === "user" ? "all projects" : "external"}</span>
-              {s.files.length > 0 && <span className="text-[11px] text-faint">{s.files.length} bundled file(s)</span>}
-            </div>
-            <div className="mt-0.5 text-[13px] text-muted">{s.description}</div>
-            <div className="mt-0.5 truncate font-mono text-[11px] text-faint">{s.path}</div>
-          </div>
-          <Toggle on={s.enabled} label="enabled" onChange={async (v) => { await act(() => api.toggleSkill(s.name, v)); void load(); }} />
-          {s.editable && <button className="btn-ghost px-2" onClick={() => openEditor(s.name)} title="Edit"><Pencil size={14} /></button>}
-          {s.editable && <ConfirmButton onConfirm={async () => { await act(() => api.deleteSkill(s.name, project), "Skill deleted"); void load(); }} />}
-        </Row>
-      ))}
-      <NewSkill open={creating} onClose={() => setCreating(false)} onCreated={(name) => { void load(); void openEditor(name); }} />
-      <ImportSkill open={importing} onClose={() => setImporting(false)} onDone={load} />
-      <SourceEditor open={!!edit} title={`Edit skill · ${edit?.name}`} path={edit?.path} value={edit?.content ?? ""} onClose={() => setEdit(null)}
-        onSave={async (content) => {
-          const ok = await act(() => api.saveSkill(edit!.name, project, content), "Skill saved");
-          if (ok) void load();
-          return !!ok;
-        }} />
-    </div>
-  );
-}
-
-function NewSkill({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (name: string) => void }) {
-  const { project, current } = useStore();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [scope, setScope] = useState<"user" | "project">("user");
-  useEffect(() => { if (open) { setName(""); setDescription(""); } }, [open]);
-  return (
-    <Modal open={open} onClose={onClose} title="New skill"
-      footer={<><button className="btn-ghost" onClick={onClose}>Cancel</button>
-        <button className="btn-primary" disabled={!name || !description} onClick={async () => {
-          if (await act(() => api.createSkill({ name, description, scope, project }))) { onClose(); onCreated(name); }
-        }}>Create & edit</button></>}>
-      <Field label="Name" hint="lowercase-with-dashes"><input className="input font-mono" autoFocus value={name} onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "-"))} placeholder="release-checklist" /></Field>
-      <Field label="Description" hint="When should the agent use it? This is all the agent sees until it loads the skill.">
-        <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Steps to cut a release: changelog, version bump, tag, publish" />
-      </Field>
-      <ScopePick scope={scope} setScope={setScope} projectName={current?.name} />
-    </Modal>
-  );
-}
-
-function ScopePick({ scope, setScope, projectName }: { scope: "user" | "project"; setScope: (s: "user" | "project") => void; projectName?: string }) {
-  return (
-    <div>
-      <span className="label">Available in</span>
-      <div className="flex gap-2">
-        {([["user", "All projects", "~/.cadence/skills"], ["project", projectName ?? "This project", ".cadence/skills in the project"]] as const).map(([id, l, d]) => (
-          <button key={id} onClick={() => setScope(id)} className={clsx("flex-1 rounded-lg border px-3 py-2 text-left text-[13px]", scope === id ? "border-brand/50 bg-brand/10" : "border-line")}>
-            <div className="font-medium">{l}</div><div className="font-mono text-[11px] text-faint">{d}</div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ImportSkill({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
-  const { project, current } = useStore();
-  const [source, setSource] = useState("");
-  const [scope, setScope] = useState<"user" | "project">("user");
-  const [busy, setBusy] = useState(false);
-  return (
-    <Modal open={open} onClose={onClose} title="Import a skill"
-      footer={<><button className="btn-ghost" onClick={onClose}>Cancel</button>
-        <button className="btn-primary" disabled={!source.trim() || busy} onClick={async () => {
-          setBusy(true);
-          const r = await act(() => api.importSkill(source.trim(), scope, project));
-          setBusy(false);
-          if (r) { toast(`Imported ${r.name}`); onDone(); onClose(); setSource(""); }
-        }}><Busy on={busy}>Import</Busy></button></>}>
-      <Field label="Folder or URL" hint="A local folder containing SKILL.md (copied with its bundled files), or an https:// link to a raw SKILL.md.">
-        <input className="input font-mono text-[13px]" autoFocus value={source} onChange={(e) => setSource(e.target.value)} placeholder="~/Downloads/pdf-skill  or  https://raw.githubusercontent.com/…/SKILL.md" />
-      </Field>
-      <ScopePick scope={scope} setScope={setScope} projectName={current?.name} />
-    </Modal>
-  );
 }
 
 function SourceEditor({ open, title, path, value, onClose, onSave, note }: {

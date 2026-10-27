@@ -27,7 +27,7 @@ from .migrate import migrate_project
 from .plugins import PluginManager
 from .projects import Project, ProjectStore
 from .sandbox import Sandbox
-from .skills import SkillRegistry
+from .skills import SkillRegistry, skill_tools
 from .tasks import TaskRunner, TaskStore
 from .tools import ToolRegistry, Workspace, builtin_tools
 
@@ -65,6 +65,9 @@ class Scope:
         self.registry = rt.registry.fork()
         for tool in builtin_tools(self.workspace, allow_shell=base.allow_shell, output_limit=base.tool_output_limit,
                                   sandbox=self.sandbox, vision=rt.router.vision):
+            self.registry.register(tool)
+        for tool in skill_tools(self.skills, self.workspace, self.sandbox, timeout=base.tool_timeout,
+                                output_limit=base.tool_output_limit, allow_shell=base.allow_shell):
             self.registry.register(tool)
         for tool in canvas_tools(rt.canvas, project.id, rt.publish, self.workspace):
             self.registry.register(tool)

@@ -10,8 +10,6 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from conftest import tool_call
 
-from kestrel.autonomy import Daemon
-from kestrel.config import load_config
 from kestrel.goals import Goal
 from kestrel.llm import Completion
 from kestrel.memory import MemoryStore
@@ -201,7 +199,6 @@ async def test_settings_persist_and_apply_live(cfg, make_router):
         assert rt.router.big.llm.name == "qwen/qwen3.5-9b"  # swapped without a restart
         assert rt.cfg.max_iterations == 12 and rt.cfg.reflection_cycles == 3 and rt.cfg.auto_approve_ideas is True
         assert view["ui"] == {"theme": "light", "project": "abc"}
-        reloaded = load_config(cfg.workspace) if False else None  # noqa: F841 — see below: HOME differs in tests
         from kestrel.config import Config, _apply, read_settings
         fresh = Config(workspace=cfg.workspace, home=cfg.home)
         _apply(fresh, read_settings(fresh), replace_lists=True)

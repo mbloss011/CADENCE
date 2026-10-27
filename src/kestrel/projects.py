@@ -29,6 +29,7 @@ class Project:
     description: str = ""
     instructions: str = ""  # added to the agent's system prompt for this project
     color: str = ""         # UI accent, e.g. "#f59e0b"
+    archived: bool = False  # hidden from the switcher; the daemon does no work here
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     created: float = field(default_factory=time.time)
     updated: float = field(default_factory=time.time)

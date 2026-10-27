@@ -31,13 +31,14 @@ class Daemon:
     def __init__(self, cfg: Config, runner: TaskRunner, store: TaskStore, notify: Notify | None = None,
                  event_sink: Callable[[str, Event], Awaitable[None]] | None = None, *,
                  planner: Planner | None = None, workspace_for: Callable[[str], Any] | None = None,
-                 ideate: Callable[[], Awaitable[int]] | None = None):
+                 ideate: Callable[[], Awaitable[int]] | None = None, archived: Callable[[], set[str]] | None = None):
         self.cfg, self.runner, self.store = cfg, runner, store
         self.notify = notify
         self.event_sink = event_sink
         self.planner = planner
         self.workspace_for = workspace_for or (lambda _pid: cfg.workspace)
         self.ideate = ideate
+        self.archived = archived or set  # project ids the daemon must leave alone
         self.paused = False
         self._wake = asyncio.Event()
         self._stop = asyncio.Event()
@@ -132,7 +133,8 @@ class Daemon:
         if free <= 0:
             return
         paused = {g.id for g in self.planner.goals.all() if g.status != "active"} if self.planner else set()
-        for task in [t for t in self.store.list("pending") if t.goal not in paused][:free]:
+        archived = self.archived()
+        for task in [t for t in self.store.list("pending") if t.goal not in paused and t.project not in archived][:free]:
             if task.id not in self._tasks:
                 self._tasks[task.id] = asyncio.create_task(self._run_task(task), name=f"task-{task.id}")
 
@@ -152,8 +154,9 @@ class Daemon:
         if not self.planner or self._planning:
             return
         now = time.time()
+        archived = self.archived()
         for goal in self.planner.goals.list("active"):
-            if self.planner.open_tasks(goal) or now - goal.last_planned < REPLAN_COOLDOWN:
+            if goal.project in archived or self.planner.open_tasks(goal) or now - goal.last_planned < REPLAN_COOLDOWN:
                 continue
             if goal.last_planned and self.planner.budget_left(goal) == 0:
                 continue

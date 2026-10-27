@@ -1,13 +1,13 @@
 import clsx from "clsx";
 import {
-  Brain, Check, ChevronsUpDown, FolderOpen, Lightbulb, ListTodo, MessageSquare, Moon, Pencil, Plus, Puzzle, Settings, Sun, Target, Trash2,
+  Archive, ArchiveRestore, Brain, Check, ChevronsUpDown, FolderOpen, Lightbulb, ListTodo, MessageSquare, Moon, Pencil, Plus, Puzzle, Settings, Sun, Target, Trash2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { Project } from "../lib/api";
+import { api, type Project } from "../lib/api";
 import { useStore } from "../lib/store";
 import { Logo } from "../views/ChatView";
 import { ProjectDialog, ProjectMark } from "./ProjectDialog";
-import { Dot, ago } from "./ui";
+import { act, Dot, ago } from "./ui";
 
 export type View = "chat" | "files" | "goals" | "tasks" | "ideas" | "memory" | "extensions" | "settings";
 export const VIEWS: View[] = ["chat", "files", "goals", "tasks", "ideas", "memory", "extensions", "settings"];
@@ -120,8 +120,11 @@ function ProjectSwitcher() {
   const store = useStore();
   const [open, setOpen] = useState(false);
   const [dialog, setDialog] = useState<{ open: boolean; project?: Project }>({ open: false });
+  const [showArchived, setShowArchived] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const cur = store.current;
+  const active = store.projects.filter((p) => !p.archived);
+  const archived = store.projects.filter((p) => p.archived);
 
   useEffect(() => {
     if (!open) return;
@@ -143,14 +146,15 @@ function ProjectSwitcher() {
       {open && (
         <div className="card absolute left-0 right-0 top-full z-40 mt-1 animate-rise overflow-hidden p-1">
           <div className="label px-2 pt-1">Projects</div>
-          <div className="max-h-72 overflow-y-auto">
-            {store.projects.map((p) => (
+          <div className="max-h-80 overflow-y-auto">
+            {[...active, ...(showArchived ? archived : [])].map((p) => (
               <div key={p.id} onClick={() => { store.setProject(p.id); setOpen(false); }}
                 className={clsx("group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-raised", p.id === store.project && "bg-raised/70")}>
                 <ProjectMark project={p} size={18} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 truncate">
-                    {p.name}
+                    <span className={clsx("truncate", p.archived && "text-faint")}>{p.name}</span>
+                    {p.archived && <span className="chip border-line text-faint">archived</span>}
                     {!p.exists && <span className="chip border-bad/40 text-bad">missing</span>}
                   </div>
                   <div className="flex gap-2 text-[10.5px] text-faint">
@@ -160,6 +164,18 @@ function ProjectSwitcher() {
                   </div>
                 </div>
                 {p.id === store.project && <Check size={14} className="text-brand" />}
+                {!p.default && (
+                  <button onClick={async (e) => {
+                    e.stopPropagation();
+                    if (await act(() => api.editProject(p.id, { archived: !p.archived }), p.archived ? `Restored “${p.name}”` : `Archived “${p.name}”`)) {
+                      await store.refreshProjects();
+                      if (!p.archived && p.id === store.project) store.setProject(store.projects.find((x) => x.default)?.id ?? "");
+                    }
+                  }} className="hidden rounded p-1 text-faint hover:text-ink group-hover:block" aria-label={p.archived ? "restore project" : "archive project"}
+                    title={p.archived ? "Restore" : "Archive: hide it and stop background work"}>
+                    {p.archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+                  </button>
+                )}
                 <button onClick={(e) => { e.stopPropagation(); setOpen(false); setDialog({ open: true, project: p }); }}
                   className="hidden rounded p-1 text-faint hover:text-ink group-hover:block" aria-label="edit project">
                   <Pencil size={12} />
@@ -167,6 +183,11 @@ function ProjectSwitcher() {
               </div>
             ))}
           </div>
+          {archived.length > 0 && (
+            <button onClick={() => setShowArchived((v) => !v)} className="flex w-full items-center gap-1.5 px-2 py-1.5 text-[11.5px] text-faint hover:text-muted">
+              <Archive size={12} /> {showArchived ? "Hide" : "Show"} archived ({archived.length})
+            </button>
+          )}
           <button onClick={() => { setOpen(false); setDialog({ open: true }); }} className="mt-1 flex w-full items-center gap-2 rounded-md border-t border-line px-2 py-2 text-[13px] text-muted hover:bg-raised hover:text-ink">
             <Plus size={14} /> New project…
           </button>

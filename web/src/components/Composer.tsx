@@ -1,11 +1,18 @@
 import clsx from "clsx";
-import { ArrowUp, CornerDownRight, ImagePlus, Loader2, Square, X } from "lucide-react";
+import { ArrowUp, CornerDownRight, FileText, Loader2, Paperclip, Square, X } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { api } from "../lib/api";
-import { useStore } from "../lib/store";
+import { useStore, type Attachment } from "../lib/store";
 import { Kbd } from "./ui";
 
-type Upload = { id: string; preview: string; name: string } | { pending: true; preview: string; name: string };
+type Upload = (Attachment | { pending: true; kind: "image" | "file"; name: string; preview?: string; size?: number }) & { key: string };
+
+const isImage = (f: File) => /^image\/(png|jpe?g|webp|gif)$/.test(f.type);
+
+function size(n?: number) {
+  if (!n) return "";
+  return n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+}
 
 export function Composer({
   running,
@@ -15,7 +22,7 @@ export function Composer({
 }: {
   running: boolean;
   disabled?: boolean;
-  onSend: (text: string, uploads: { id: string; preview: string }[]) => void;
+  onSend: (text: string, uploads: Attachment[]) => void;
   onStop: () => void;
 }) {
   const [text, setText] = useState("");
@@ -64,29 +71,30 @@ export function Composer({
   }, [running, onStop]);
 
   const addFiles = async (files: File[]) => {
-    const images = files.filter((f) => f.type.startsWith("image/"));
-    if (!images.length) return;
+    if (!files.length) return;
     setError("");
-    for (const f of images) {
-      const preview = URL.createObjectURL(f);
-      setUploads((u) => [...u, { pending: true, preview, name: f.name }]);
+    for (const f of files) {
+      const key = `${f.name}-${f.size}-${Math.random()}`;
+      const kind = isImage(f) ? "image" : "file";
+      const preview = kind === "image" ? URL.createObjectURL(f) : undefined;
+      setUploads((u) => [...u, { key, pending: true, kind, name: f.name, preview, size: f.size }]);
       try {
         const res = await api.upload(f);
-        setUploads((u) => u.map((x) => (x.preview === preview ? { id: res.id, preview, name: f.name } : x)));
+        setUploads((u) => u.map((x) => (x.key === key ? { key, id: res.id, name: res.name, kind: res.kind, preview, size: res.size } : x)));
       } catch (e) {
-        setUploads((u) => u.filter((x) => x.preview !== preview));
+        setUploads((u) => u.filter((x) => x.key !== key));
         setError(`Upload failed: ${(e as Error).message}`);
       }
     }
   };
 
-  const ready = uploads.filter((u): u is Extract<Upload, { id: string }> => "id" in u);
+  const ready = uploads.filter((u): u is Attachment & { key: string } => "id" in u);
   const busy = uploads.some((u) => "pending" in u);
   const canSend = !disabled && !busy && (text.trim().length > 0 || (!running && ready.length > 0));
 
   const submit = () => {
     if (!canSend) return;
-    onSend(text.trim(), running ? [] : ready.map(({ id, preview }) => ({ id, preview })));
+    onSend(text.trim(), running ? [] : ready.map(({ key: _key, ...a }) => a));
     setText("");
     if (!running) setUploads([]);
   };
@@ -109,7 +117,7 @@ export function Composer({
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDrag(false);
-    void addFiles(Array.from(e.dataTransfer.files));
+    if (!running) void addFiles(Array.from(e.dataTransfer.files));
   };
 
   return (
@@ -135,15 +143,25 @@ export function Composer({
         {uploads.length > 0 && (
           <div className="flex flex-wrap gap-2 px-3 pt-3">
             {uploads.map((u) => (
-              <div key={u.preview} className="group relative">
-                <img src={u.preview} alt={u.name} className={clsx("h-16 w-16 rounded-lg border border-line object-cover", "pending" in u && "opacity-50")} />
+              <div key={u.key} className="group relative">
+                {u.kind === "image" && u.preview ? (
+                  <img src={u.preview} alt={u.name} className={clsx("h-16 w-16 rounded-lg border border-line object-cover", "pending" in u && "opacity-50")} />
+                ) : (
+                  <div className={clsx("flex h-16 max-w-[14rem] items-center gap-2 rounded-lg border border-line bg-raised px-3", "pending" in u && "opacity-60")}>
+                    <FileText size={20} className="shrink-0 text-brand" />
+                    <div className="min-w-0">
+                      <div className="truncate text-[12.5px] font-medium">{u.name}</div>
+                      <div className="text-[11px] text-faint">{"pending" in u ? "uploading…" : size(u.size)}</div>
+                    </div>
+                  </div>
+                )}
                 {"pending" in u ? (
-                  <Loader2 size={16} className="absolute inset-0 m-auto animate-spin text-ink" />
+                  u.kind === "image" && <Loader2 size={16} className="absolute inset-0 m-auto animate-spin text-ink" />
                 ) : (
                   <button
-                    onClick={() => setUploads((x) => x.filter((y) => y.preview !== u.preview))}
+                    onClick={() => setUploads((x) => x.filter((y) => y.key !== u.key))}
                     className="absolute -right-1.5 -top-1.5 hidden rounded-full border border-line bg-panel p-0.5 text-muted hover:text-ink group-hover:block"
-                    aria-label="remove image"
+                    aria-label="remove attachment"
                   >
                     <X size={12} />
                   </button>
@@ -164,20 +182,20 @@ export function Composer({
           disabled={disabled}
         />
         <div className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
-          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden
+          <input ref={fileRef} type="file" multiple hidden
             onChange={(e) => {
               void addFiles(Array.from(e.target.files ?? []));
               e.target.value = "";
             }}
           />
-          <button onClick={() => fileRef.current?.click()} disabled={running} className="btn-ghost px-2" title="Attach image (or paste / drop)">
-            <ImagePlus size={17} />
+          <button onClick={() => fileRef.current?.click()} disabled={running} className="btn-ghost px-2" title="Attach files: images, PDFs, Office docs, spreadsheets, data, code… (or paste / drop)">
+            <Paperclip size={17} />
           </button>
           <div className="flex-1 truncate text-[11px] text-faint">
             {error ? <span className="text-bad">{error}</span> : running ? (
               <span><Kbd>Enter</Kbd> steer · <Kbd>Esc</Kbd> stop</span>
             ) : (
-              <span className="hidden sm:inline"><Kbd>Enter</Kbd> send · <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> newline · paste or drop images</span>
+              <span className="hidden sm:inline"><Kbd>Enter</Kbd> send · <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> newline · drop any file: images, PDF, Word, Excel, CSV, JSON, code…</span>
             )}
           </div>
           {running && (

@@ -193,7 +193,7 @@ class Runtime:
     # ----------------------------------------------------------------- daemon
     async def _ideate(self) -> int:
         """One idea cycle, rotating through projects (those with active goals first)."""
-        projects = [p for p in self.projects.all() if p.root.is_dir()]
+        projects = [p for p in self.projects.all() if p.root.is_dir() and not p.archived]
         if not projects:
             return 0
         projects.sort(key=lambda p: (not self.goals.list("active", project=p.id), -p.updated))
@@ -207,7 +207,8 @@ class Runtime:
 
     def make_daemon(self, notify: Notify | None = None, event_sink=None) -> Daemon:
         self.daemon = Daemon(self.cfg, self.runner, self.tasks, notify, event_sink, planner=self.planner,
-                             workspace_for=lambda pid: self.project(pid).root, ideate=self._ideate)
+                             workspace_for=lambda pid: self.project(pid).root, ideate=self._ideate,
+                             archived=lambda: {p.id for p in self.projects.all() if p.archived})
         return self.daemon
 
     async def close(self) -> None:

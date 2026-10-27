@@ -1,9 +1,10 @@
 import clsx from "clsx";
 import {
-  Bot, ChevronRight, Download, Eye, EyeOff, File, FilePlus2, FileCode2, FileImage, FileText, Folder, FolderOpen, FolderPlus, MessageSquare,
+  Bot, ChevronRight, Download, Eye, EyeOff, File, FilePlus2, FileCode2, FileImage, FileSpreadsheet, FileText, Folder, FolderOpen, FolderPlus, MessageSquare,
   PencilLine, RefreshCw, Save, Search, TextCursorInput, Upload,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { LookPanel, LOOKABLE, RichPreview, richKind } from "../components/FilePreview";
 import { Markdown } from "../components/Messages";
 import { act, ago, CodeEditor, ConfirmButton, Empty, Field, Modal, toast } from "../components/ui";
 import { api, ApiError, type FileContent, type FileEntry } from "../lib/api";
@@ -16,7 +17,8 @@ function icon(e: FileEntry, open: boolean) {
   if (e.dir) return open ? FolderOpen : Folder;
   if (IMAGE.test(e.name)) return FileImage;
   if (CODE.test(e.name)) return FileCode2;
-  if (/\.(md|txt|rst)$/i.test(e.name)) return FileText;
+  if (/\.(md|txt|rst|pdf|docx?|pptx?|odt|rtf|epub)$/i.test(e.name)) return FileText;
+  if (/\.(csv|tsv|xlsx?|xlsm|ods|db|sqlite3?)$/i.test(e.name)) return FileSpreadsheet;
   return File;
 }
 
@@ -68,7 +70,8 @@ export function FilesView({ onDiscuss }: { onDiscuss: (text: string) => void }) 
       const f = await api.readFile(project, path);
       setFile(f);
       setDraft(f.content ?? "");
-      setPreview(/\.(md|html?)$/i.test(path) || IMAGE.test(path) || f.binary);
+      const rich = richKind(path);
+      setPreview(/\.(md|html?)$/i.test(path) || IMAGE.test(path) || f.binary || rich === "table" || rich === "document" || rich === "media");
     } catch (e) {
       toast((e as Error).message, "bad");
     }
@@ -159,6 +162,7 @@ export function FilesView({ onDiscuss }: { onDiscuss: (text: string) => void }) 
   const isImage = selected && IMAGE.test(selected);
   const isHtml = selected && /\.html?$/i.test(selected);
   const isMd = selected && /\.md$/i.test(selected);
+  const rich = selected ? richKind(selected) : "";
 
   return (
     <div className="flex h-full min-w-0 flex-1" onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={onDrop}>
@@ -207,7 +211,7 @@ export function FilesView({ onDiscuss }: { onDiscuss: (text: string) => void }) 
                 <div className="truncate font-mono text-[13px]">{selected}</div>
                 <div className="text-[11px] text-faint">{size(file.size)}{file.mtime ? ` · modified ${ago(file.mtime)}` : ""}{dirty ? " · unsaved" : ""}</div>
               </div>
-              {(isMd || isHtml) && !file.binary && (
+              {(isMd || isHtml || rich) && !file.binary && (
                 <button className="btn-ghost px-2" onClick={() => setPreview((p) => !p)} title={preview ? "Edit" : "Preview"}>{preview ? <PencilLine size={15} /> : <Eye size={15} />}</button>
               )}
               <button className="btn-ghost px-2" title="Discuss in a new chat" onClick={() => onDiscuss(`Look at \`${selected}\` and `)}><MessageSquare size={15} /></button>
@@ -235,8 +239,8 @@ export function FilesView({ onDiscuss }: { onDiscuss: (text: string) => void }) 
                 <div className="flex h-full items-center justify-center bg-[repeating-conic-gradient(rgb(var(--raised))_0%_25%,transparent_0%_50%)] bg-[length:16px_16px] p-6">
                   <img src={api.rawUrl(project, selected)} alt={selected} className="max-h-full max-w-full rounded shadow-card" />
                 </div>
-              ) : file.binary ? (
-                <Empty icon={<File size={18} />} title="Binary file">{file.mime || "unknown type"} · {size(file.size)}. Download it to open.</Empty>
+              ) : file.binary || (preview && rich) ? (
+                <RichPreview project={project} path={selected} version={file.mtime} />
               ) : preview && isHtml ? (
                 <iframe title={selected} src={api.rawUrl(project, selected)} sandbox="allow-scripts" className="h-full w-full bg-white" />
               ) : preview && isMd ? (
@@ -245,6 +249,7 @@ export function FilesView({ onDiscuss }: { onDiscuss: (text: string) => void }) 
                 <CodeEditor value={draft} onChange={setDraft} onSave={() => save()} className="h-full rounded-none border-0" minRows={40} />
               )}
             </div>
+            {LOOKABLE.test(selected) && <LookPanel project={project} path={selected} />}
           </>
         )}
       </div>

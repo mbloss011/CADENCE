@@ -6,7 +6,6 @@ import hmac
 import json
 import re
 import shutil
-from pathlib import Path
 
 import httpx
 import pytest
@@ -16,10 +15,10 @@ from kestrel.agent import Agent
 from kestrel.channels import Bridge, chunk
 from kestrel.channels.telegram import TelegramChannel
 from kestrel.channels.whatsapp import WhatsAppChannel
-from kestrel.config import HookConfig, SandboxConfig, load_config
+from kestrel.config import HookConfig, SandboxConfig
 from kestrel.context import deterministic_summary, render_transcript
 from kestrel.hooks import Hooks
-from kestrel.llm import Completion, LLMError, ModelRouter, content_text, message_tokens
+from kestrel.llm import Completion, LLMError, content_text, message_tokens
 from kestrel.memory import LocalVectorIndex, MemoryStore, QdrantIndex, SemanticIndex
 from kestrel.plugins import PluginManager
 from kestrel.runtime import Runtime
@@ -185,7 +184,7 @@ async def test_view_image_rejects_non_images(cfg, make_router):
     (cfg.workspace / "notes.txt").write_text("hi")
     router = make_router(big_script=[tool_call("view_image", path="notes.txt"), Completion(content="ok")])
     events = [e async for e in _agent(cfg, router, vision=ScriptedLLM("vlm")).run("x")]
-    assert "unsupported image type" in next(e for e in events if e.type == "tool_result").data["result"]
+    assert "is a text file: use read_file" in next(e for e in events if e.type == "tool_result").data["result"]
 
 
 # ───────────────────────────────────────────────────────── hooks and plugins

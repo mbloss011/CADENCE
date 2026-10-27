@@ -1,4 +1,4 @@
-import { FolderPlus, Sparkles } from "lucide-react";
+import { Archive, ArchiveRestore, FolderPlus, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Project } from "../lib/api";
 import { useStore } from "../lib/store";
@@ -70,7 +70,16 @@ export function ProjectDialog({ open, onClose, project }: { open: boolean; onClo
   return (
     <Modal open={open} onClose={onClose} title={editing ? "Edit project" : <span className="flex items-center gap-2"><FolderPlus size={16} className="text-brand" /> New project</span>}
       footer={<>
-        {editing && !project!.default && <ConfirmButton onConfirm={remove} label="Remove project" icon={false} className="mr-auto" />}
+        {editing && !project!.default && <ConfirmButton onConfirm={remove} label="Remove project" icon={false} />}
+        {editing && !project!.default && (
+          <button className="btn-ghost mr-auto" onClick={async () => {
+            if (await act(() => api.editProject(project!.id, { archived: !project!.archived }), project!.archived ? "Project restored" : "Project archived")) {
+              await store.refreshProjects();
+              if (!project!.archived && project!.id === store.project) store.setProject(store.projects.find((x) => x.default)?.id ?? "");
+              onClose();
+            }
+          }}>{project!.archived ? <><ArchiveRestore size={14} /> Restore</> : <><Archive size={14} /> Archive</>}</button>
+        )}
         <button onClick={onClose} className="btn-ghost">Cancel</button>
         <button onClick={save} disabled={!path.trim() || saving} className="btn-primary"><Busy on={saving}>{editing ? "Save" : "Create project"}</Busy></button>
       </>}>

@@ -97,6 +97,15 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
                 raise web.HTTPBadRequest(text=str(exc))
             for sid in [sid for sid, s in hub.sessions.items() if s.agent.project == p.id]:
                 hub.sessions.pop(sid)  # reload with tools bound to the new directory
+        if "archived" in data:
+            if data["archived"] and p.id == rt.default_project.id:
+                raise web.HTTPConflict(text="the launch folder is the default project and cannot be archived")
+            changes["archived"] = bool(data["archived"])
+            if changes["archived"]:
+                for t in rt.tasks.all():  # stop work in progress; queued tasks stay queued for when it returns
+                    if norm(t.project) == p.id and t.id in rt.runner.agents:
+                        rt.runner.agents[t.id].interrupt()
+                await rt.browser.get(p.id).close()
         rt.projects.update(p, **changes)
         await changed("projects")
         return web.json_response(project_dict(p))

@@ -40,7 +40,8 @@ kestrel web            # http://127.0.0.1:8765 — also runs the daemon + channe
 kestrel web --open     # and open the browser    ·  --no-daemon / --no-channels / --port N
 ```
 
-- **Projects**: every chat, task, goal, idea, canvas document and browser profile belongs to a project:
+- **Projects** (archive the ones you're done with: hidden from the switcher, no background work, nothing deleted):
+  every chat, task, goal, idea, canvas document and browser profile belongs to a project:
   a named folder the agent's tools, shell and sandbox are confined to. Leave the name empty and the
   small model names it from the folder's files and README. Switch projects from the top of the sidebar.
 - **Chat**: streaming replies, tool cards, thinking, steering (send while it works), `Esc` to stop,
@@ -51,7 +52,15 @@ kestrel web --open     # and open the browser    ·  --no-daemon / --no-channels
   - **Browser**: one real Chromium per project that you and the agent drive together. It streams live; your
     clicks, typing and scrolling go to the page, so you can log in or solve a captcha and hand back. The
     agent uses `browser_open/snapshot/click/type/scroll/back/key/look`. Logins persist per project.
-- **Files**: explorer + editor for the project. Files the agent writes are marked and refresh live;
+- **Any file type**: drop any file into chat (PDF, Word, PowerPoint, Excel/CSV, JSON/YAML, notebooks, epub,
+  SQLite, archives, media, code…). It is saved to `.kestrel/attachments/` in the project and its contents are
+  extracted into the message. The agent's `read_file` reads every type the same way (tables get column stats;
+  `pages=` for PDFs, `sheet=` for workbooks), and `view_image` looks at any image format or any page of a PDF
+  or office document with the vision model (charts, layouts, scanned pages). Legacy `.doc/.ppt/.ods` go
+  through LibreOffice when installed; page rendering uses `pdftoppm` (poppler-utils).
+- **Files**: explorer + editor for the project, with previews: spreadsheets and CSV as tables (sheet tabs),
+  PDFs in the browser's viewer (plus extracted text), Word/PowerPoint/notebooks as formatted text, audio/video
+  players, and a **Look** bar that asks the vision model about an image or page. Files the agent writes are marked and refresh live;
   saving over an agent edit asks first. Upload by drag-and-drop; HTML/Markdown/image previews.
 - **Goals**: long-horizon objectives with a vision and success criteria. The planner reviews progress,
   queues the next 1-3 tasks, re-plans after each one, asks you when it is stuck, and marks the goal
@@ -149,7 +158,7 @@ plugins.py (register(api): tools + hooks)
 ## Tests
 
 ```bash
-pytest -q        # 69 tests: context, agent loop, tasks, goals + planner, ideas, projects, MCP (incl. hot add/remove),
+pytest -q        # 76 tests: any-file extraction (docx, pptx, pdf, xlsx, csv, json, yaml, rtf, ipynb, sqlite, zip, images), context, agent loop, tasks, goals + planner, ideas, projects, MCP (incl. hot add/remove),
                  # daemon, vector memory (local + Qdrant), images, hooks, plugins (live reload), skills, settings,
                  # bwrap sandbox, Telegram, WhatsApp, web API + websocket, files, canvas, shared browser (real Chrome)
 ```

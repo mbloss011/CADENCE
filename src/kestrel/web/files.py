@@ -7,6 +7,7 @@ an opaque origin and cannot call this API with the user's session.
 
 from __future__ import annotations
 
+import json
 import mimetypes
 import shutil
 from dataclasses import asdict
@@ -16,7 +17,10 @@ from typing import TYPE_CHECKING, Any
 from aiohttp import web
 
 from ..canvas import FORMATS, CanvasDoc
+from ..documents import ExtractError, extract, needs_extract, to_viewable
+from ..llm import LLMError
 from ..tools import SKIP_DIRS, ToolError, Workspace
+from ..vision import ImageError, describe
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
@@ -24,22 +28,8 @@ if TYPE_CHECKING:
 
 MAX_TEXT = 2 * 1024 * 1024
 MAX_UPLOAD = 50 * 1024 * 1024
+MAX_PREVIEW = 300_000
 SANDBOX_CSP = "sandbox allow-scripts; default-src 'self' data: blob: 'unsafe-inline'"
-
-
-def _is_text(path: Path) -> bool:
-    try:
-        with path.open("rb") as fh:
-            chunk = fh.read(8192)
-    except OSError:
-        return False
-    if b"\0" in chunk:
-        return False
-    try:
-        chunk.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        return exc.start > len(chunk) - 4  # a multi-byte char cut at the buffer edge is still text
-    return True
 
 
 def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
@@ -107,7 +97,9 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
             raise web.HTTPNotFound(text="no such file")
         size = f.stat().st_size
         mime = mimetypes.guess_type(f.name)[0] or ""
-        if size > MAX_TEXT or not _is_text(f):
+        with f.open("rb") as fh:
+            head = fh.read(8192)
+        if size > MAX_TEXT or needs_extract(f, head):  # PDFs, Office, images… open in the preview, not the editor
             return web.json_response({"path": ws.rel(f), "binary": True, "size": size, "mime": mime})
         return web.json_response({"path": ws.rel(f), "binary": False, "size": size, "mime": mime,
                                   "mtime": f.stat().st_mtime, "content": f.read_text(encoding="utf-8", errors="replace")})
@@ -118,10 +110,43 @@ def routes(r: web.RouteTableDef, rt: "Runtime", hub: "Hub") -> None:
         f = resolve(ws, req.query.get("path", ""))
         if not f.is_file():
             raise web.HTTPNotFound(text="no such file")
-        headers = {"Content-Security-Policy": SANDBOX_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-cache"}
+        headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "no-cache"}
+        if f.suffix.lower() != ".pdf":  # Chrome's PDF viewer will not run in a sandboxed document; a PDF is not HTML either way
+            headers["Content-Security-Policy"] = SANDBOX_CSP
         if req.query.get("download"):
             headers["Content-Disposition"] = f'attachment; filename="{f.name}"'
         return web.FileResponse(f, headers=headers)
+
+    @r.get("/api/files/preview")
+    async def preview(req: web.Request) -> web.Response:
+        """Any file as text + tables (PDF, Office, spreadsheets, data, archives, databases, media …)."""
+        ws, _pid = ws_of(req.query.get("project", ""))
+        f = resolve(ws, req.query.get("path", ""))
+        if not f.is_file():
+            raise web.HTTPNotFound(text="no such file")
+        try:
+            ex = await extract(f, pages=req.query.get("pages") or None, sheet=req.query.get("sheet") or None)
+        except ExtractError as exc:
+            raise web.HTTPUnprocessableEntity(text=str(exc))
+        d = ex.to_dict()
+        if len(d["text"]) > MAX_PREVIEW:
+            d["text"] = d["text"][:MAX_PREVIEW] + f"\n…[{len(ex.text) - MAX_PREVIEW} more chars]"
+        return web.json_response(d, dumps=lambda o: json.dumps(o, default=str))
+
+    @r.post("/api/files/look")
+    async def look(req: web.Request) -> web.Response:
+        """Ask the vision model about an image, or one page of a PDF / office document."""
+        data = await body(req)
+        ws, _pid = ws_of(str(data.get("project", "")))
+        f = resolve(ws, str(data.get("path", "")))
+        try:
+            image = await to_viewable(f, max(1, int(data.get("page", 1) or 1)))
+            text = await describe(rt.router.vision, image, str(data.get("question", "") or ""))
+        except (ExtractError, ImageError) as exc:
+            raise web.HTTPUnprocessableEntity(text=str(exc))
+        except LLMError as exc:
+            raise web.HTTPBadGateway(text=f"vision model unavailable: {exc}")
+        return web.json_response({"text": text})
 
     @r.put("/api/files/write")
     async def write(req: web.Request) -> web.Response:

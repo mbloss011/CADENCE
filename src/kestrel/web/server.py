@@ -16,7 +16,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import secrets
+import shutil
 import time
 import uuid
 from dataclasses import asdict
@@ -30,13 +32,19 @@ from aiohttp import WSMsgType, web
 from ..agent import Agent, Event
 from ..llm import LLMError, OpenAICompatLLM, content_text
 from ..runtime import Runtime
+from ..documents import ExtractError, extract
 from ..vision import MAX_IMAGE_BYTES, MIME
+
+MAX_ATTACHMENT = 50 * 1024 * 1024
 
 log = logging.getLogger(__name__)
 
 STATIC = Path(__file__).parent / "static"
 STEER_PREFIX = "[steering from user — adjust course accordingly] "
 HOOK_MARK = "\n\n[context from hooks]\n"
+ATTACH_MARK = "\n\n[attached files]\n"
+ATTACH_RE = re.compile(r"^### (.+?) \((.+?)\) — saved as (.+)$", re.M)
+ATTACH_CHARS = 15000  # extracted text per attachment placed in the message; the agent can read_file the rest
 WRITE_TOOLS = ("write_file", "edit_file", "canvas_export")
 
 
@@ -54,8 +62,10 @@ def transcript(agent: Agent) -> list[dict[str, Any]]:
                 continue
             images = [p["image_url"]["url"] for p in content if isinstance(p, dict) and p.get("type") == "image_url"] \
                 if isinstance(content, list) else []
-            text = text.replace("[image]", "").strip()
-            items.append({"role": "user", "text": text.split(HOOK_MARK)[0], "images": images})
+            text = text.replace("[image]", "").strip().split(HOOK_MARK)[0]
+            text, _, block = text.partition(ATTACH_MARK)
+            files = [{"name": n, "kind": k, "path": p} for n, k, p in ATTACH_RE.findall(block)]
+            items.append({"role": "user", "text": text, "images": images, "files": files})
         elif role == "assistant":
             if content_text(content).strip():
                 items.append({"role": "assistant", "text": content_text(content)})
@@ -74,7 +84,11 @@ def _first_user_text(messages: list[dict[str, Any]]) -> str:
         if m.get("role") == "user":
             text = content_text(m.get("content")).replace("[image]", "🖼").strip()
             if not text.startswith(STEER_PREFIX):
-                return text.split(HOOK_MARK)[0][:70] or "Image"
+                head = text.split(HOOK_MARK)[0].split(ATTACH_MARK)[0].strip()
+                if not head and ATTACH_MARK in text:
+                    names = ATTACH_RE.findall(text)
+                    head = "📎 " + ", ".join(n for n, _, _ in names)
+                return head[:70] or "Image"
     return "New chat"
 
 
@@ -181,6 +195,33 @@ class Hub:
         path = self.session_dir() / f"{sid}.json"
         if path.is_file():
             path.unlink()
+
+    async def attach(self, sid: str, files: list[Path]) -> str:
+        """Copy uploads into the project (so the agent can read_file them further) and inline their contents."""
+        project = self.rt.project(self.get(sid).agent.project)
+        folder = project.root / ".kestrel" / "attachments"
+        folder.mkdir(parents=True, exist_ok=True)
+        blocks = []
+        for src in files:
+            original = src.name.split("-", 1)[1] if "-" in src.name else src.name
+            dest = folder / original
+            n = 1
+            while dest.exists():
+                n += 1
+                dest = folder / f"{Path(original).stem}-{n}{Path(original).suffix}"
+            shutil.copy2(src, dest)
+            rel = str(dest.relative_to(project.root))
+            try:
+                ex = await extract(dest)
+                kind = ex.kind + (f", {ex.pages} pages" if ex.pages else "")
+                body = ex.text if len(ex.text) <= ATTACH_CHARS else (
+                    ex.text[:ATTACH_CHARS] + f"\n…[{len(ex.text) - ATTACH_CHARS} more chars: read_file {rel} with offset/pages]")
+                if ex.warning:
+                    body = f"NOTE: {ex.warning}\n{body}"
+            except ExtractError as exc:
+                kind, body = "unreadable", f"(could not extract: {exc})"
+            blocks.append(f"### {original} ({kind}) — saved as {rel}\n{body}")
+        return ATTACH_MARK + "\n\n".join(blocks)
 
     # --------------------------------------------------------------- turns
     async def send(self, sid: str, text: str, images: list[Path]) -> str:
@@ -374,25 +415,26 @@ def build_app(rt: Runtime, *, allowed_hosts: set[str] | None = None, token: str 
 
     @r.post("/api/upload")
     async def upload(req: web.Request) -> web.Response:
+        """Any file for a chat message. Images go to the vision model; everything else is extracted to text."""
         reader = await req.multipart()
         part = await reader.next()
         if part is None or part.name != "file":
             raise web.HTTPBadRequest(text="expected a 'file' field")
-        suffix = Path(part.filename or "").suffix.lower()
-        if suffix not in MIME:
-            raise web.HTTPBadRequest(text=f"unsupported image type '{suffix}'")
+        name = re.sub(r"[^\w.\- ()]+", "_", Path(part.filename or "file").name).strip() or "file"
+        is_image = Path(name).suffix.lower() in MIME
+        limit = MAX_IMAGE_BYTES if is_image else MAX_ATTACHMENT
         hub.inbox.mkdir(parents=True, exist_ok=True)
-        dest = hub.inbox / f"{uuid.uuid4().hex[:12]}{suffix}"
+        dest = hub.inbox / f"{uuid.uuid4().hex[:12]}-{name}"
         size = 0
         with dest.open("wb") as fh:
             while chunk := await part.read_chunk():
                 size += len(chunk)
-                if size > MAX_IMAGE_BYTES:
+                if size > limit:
                     fh.close()
                     dest.unlink(missing_ok=True)
-                    raise web.HTTPRequestEntityTooLarge(max_size=MAX_IMAGE_BYTES, actual_size=size)
+                    raise web.HTTPRequestEntityTooLarge(max_size=limit, actual_size=size)
                 fh.write(chunk)
-        return web.json_response({"id": dest.name, "name": part.filename})
+        return web.json_response({"id": dest.name, "name": name, "kind": "image" if is_image else "file", "size": size})
 
     @r.get("/api/memory")
     async def memory(req: web.Request) -> web.Response:
@@ -465,14 +507,16 @@ async def _ws_op(hub: Hub, ws: web.WebSocketResponse, data: dict[str, Any]) -> N
     ref = data.get("ref")
     if op == "send":
         text = str(data.get("text", "")).strip()
-        images = []
-        for name in data.get("images") or []:
+        images, files = [], []
+        for name in [*(data.get("images") or []), *(data.get("files") or [])]:
             p = (hub.inbox / str(name)).resolve()
             if hub.inbox.resolve() not in p.parents or not p.is_file():
                 raise ValueError(f"unknown upload {name}")
-            images.append(p)
-        if not text and not images:
+            (images if p.suffix.lower() in MIME else files).append(p)
+        if not text and not images and not files:
             raise ValueError("empty message")
+        if files:
+            text = (text or "Take a look at the attached file(s).") + await hub.attach(sid, files)
         state = await hub.send(sid, text or "Describe the attached image.", images)
         await ws.send_str(json.dumps({"kind": "ack", "ref": ref, "session": sid, "state": state}))
     elif op == "steer":

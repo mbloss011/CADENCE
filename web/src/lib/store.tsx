@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from "react";
-import { api, fromRaw, type Item, type Notice, type Project, type SessionSummary, type Todo, type Usage } from "./api";
+import { api, fromRaw, type AttachedFile, type Item, type Notice, type Project, type SessionSummary, type Todo, type Usage } from "./api";
 import { socket, type ServerMsg } from "./socket";
+
+export type Attachment = { id: string; name: string; kind: "image" | "file"; preview?: string; size?: number };
 
 export type DockTab = "plan" | "canvas" | "browser";
 export type Dock = { tab: DockTab | null; canvasId: string | null };
@@ -54,7 +56,7 @@ type AgentEvent = { type: string; data: Record<string, any> };
 type Action =
   | { t: "sessions"; sessions: SessionSummary[] }
   | { t: "load"; sid: string; chat: Chat }
-  | { t: "send"; sid: string; text: string; images: string[] }
+  | { t: "send"; sid: string; text: string; images: string[]; files: AttachedFile[] }
   | { t: "event"; sid: string; ev: AgentEvent }
   | { t: "steer"; sid: string; text: string }
   | { t: "turn"; sid: string; running: boolean; title?: string; project?: string }
@@ -132,7 +134,7 @@ function reducer(s: State, a: Action): State {
       return put(a.sid, a.chat);
     case "send": {
       const c = chat(a.sid);
-      return put(a.sid, { ...c, running: true, items: [...settle(c.items), { kind: "user", text: a.text, images: a.images }] });
+      return put(a.sid, { ...c, running: true, items: [...settle(c.items), { kind: "user", text: a.text, images: a.images, files: a.files }] });
     }
     case "event":
       return put(a.sid, applyEvent(chat(a.sid), a.ev));
@@ -181,7 +183,7 @@ type Ctx = State & {
   setDraft: (text: string | null) => void;
   refreshSessions: () => Promise<void>;
   loadChat: (sid: string) => Promise<void>;
-  send: (sid: string, text: string, uploads: { id: string; preview: string }[]) => void;
+  send: (sid: string, text: string, uploads: Attachment[]) => void;
   steer: (sid: string, text: string) => void;
   interrupt: (sid: string) => void;
   remove: (sid: string) => Promise<void>;
@@ -295,8 +297,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       loadChat,
       send: (sid, text, uploads) => {
         const running = state.chats[sid]?.running;
-        if (!running) dispatch({ t: "send", sid, text, images: uploads.map((u) => u.preview) });
-        socket.send({ op: "send", session: sid, text, images: uploads.map((u) => u.id) });
+        const images = uploads.filter((u) => u.kind === "image");
+        const files = uploads.filter((u) => u.kind === "file");
+        if (!running) dispatch({ t: "send", sid, text, images: images.map((u) => u.preview ?? ""), files: files.map((f) => ({ name: f.name, kind: "file" })) });
+        socket.send({ op: "send", session: sid, text, images: images.map((u) => u.id), files: files.map((u) => u.id) });
       },
       steer: (sid, text) => socket.send({ op: "steer", session: sid, text }),
       interrupt: (sid) => socket.send({ op: "interrupt", session: sid }),

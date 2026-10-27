@@ -1,7 +1,9 @@
 export type Todo = { content: string; status: "pending" | "in_progress" | "done" };
 
+export type AttachedFile = { name: string; kind: string; path?: string };
+
 export type Item =
-  | { kind: "user"; text: string; images: string[] }
+  | { kind: "user"; text: string; images: string[]; files?: AttachedFile[] }
   | { kind: "steer"; text: string }
   | { kind: "assistant"; text: string; streaming?: boolean }
   | { kind: "thinking"; text: string; streaming?: boolean }
@@ -29,7 +31,7 @@ export type SessionDetail = SessionSummary & {
 };
 
 type RawItem =
-  | { role: "user"; text: string; images: string[] }
+  | { role: "user"; text: string; images: string[]; files?: AttachedFile[] }
   | { role: "steer"; text: string }
   | { role: "assistant"; text: string }
   | { role: "tool"; id: string; name: string; arguments: string; result: string | null };
@@ -37,7 +39,7 @@ type RawItem =
 export function fromRaw(raw: RawItem[]): Item[] {
   return raw.map((r) => {
     if (r.role === "tool") return { kind: "tool", id: r.id, name: r.name, arguments: r.arguments, result: r.result };
-    if (r.role === "user") return { kind: "user", text: r.text, images: r.images };
+    if (r.role === "user") return { kind: "user", text: r.text, images: r.images, files: r.files ?? [] };
     return { kind: r.role, text: r.text } as Item;
   });
 }
@@ -53,6 +55,7 @@ export type Project = {
   updated: number;
   exists: boolean;
   default: boolean;
+  archived: boolean;
   counts: { goals: number; tasks: number; ideas: number };
 };
 
@@ -180,6 +183,19 @@ export type McpRow = { name: string; command: string; args: string[]; env: Recor
 export type HookRow = { event: string; command: string; matcher: string; timeout: number };
 export type Hooks = { events: string[]; shell: HookRow[]; plugin: { event: string; matcher: string; owner: string }[] };
 
+export type Uploaded = { id: string; name: string; kind: "image" | "file"; size: number };
+
+export type PreviewTable = { name: string; columns: string[]; rows: unknown[][]; total_rows: number };
+export type Preview = {
+  kind: "text" | "code" | "data" | "table" | "document" | "pdf" | "image" | "archive" | "database" | "media" | "binary";
+  format: string;
+  text: string;
+  tables: PreviewTable[];
+  pages: number | null;
+  meta: Record<string, unknown>;
+  warning: string;
+};
+
 export type FileEntry = { name: string; path: string; dir: boolean; size: number; mtime: number; hidden: boolean; heavy: boolean };
 export type FileContent = { path: string; binary: boolean; size: number; mime: string; mtime?: number; content?: string };
 
@@ -228,7 +244,7 @@ export const api = {
   upload: (file: File) => {
     const fd = new FormData();
     fd.append("file", file, file.name);
-    return req<{ id: string; name: string }>("/api/upload", { method: "POST", body: fd });
+    return req<Uploaded>("/api/upload", { method: "POST", body: fd });
   },
 
   // projects
@@ -236,7 +252,7 @@ export const api = {
   suggestName: (path: string) => req<{ name: string; path: string }>("/api/projects/suggest-name", json("POST", { path })),
   addProject: (p: { path: string; name?: string; description?: string; instructions?: string; create?: boolean; color?: string }) =>
     req<Project>("/api/projects", json("POST", p)),
-  editProject: (id: string, p: Partial<Pick<Project, "name" | "path" | "description" | "instructions" | "color">> & { create?: boolean }) =>
+  editProject: (id: string, p: Partial<Pick<Project, "name" | "path" | "description" | "instructions" | "color" | "archived">> & { create?: boolean }) =>
     req<Project>(`/api/projects/${id}`, json("PATCH", p)),
   deleteProject: (id: string) => req<{ ok: boolean }>(`/api/projects/${id}`, { method: "DELETE" }),
 
@@ -307,6 +323,10 @@ export const api = {
   files: (project: string, path = "") => req<{ path: string; root: string; entries: FileEntry[]; truncated: boolean }>(`/api/files?${q({ project, path })}`),
   searchFiles: (project: string, query: string) => req<FileEntry[]>(`/api/files/search?${q({ project, q: query })}`),
   readFile: (project: string, path: string) => req<FileContent>(`/api/files/read?${q({ project, path })}`),
+  preview: (project: string, path: string, opts: { pages?: string; sheet?: string } = {}) =>
+    req<Preview>(`/api/files/preview?${q({ project, path, ...opts })}`),
+  look: (project: string, path: string, question: string, page = 1) =>
+    req<{ text: string }>("/api/files/look", json("POST", { project, path, question, page })),
   rawUrl: (project: string, path: string, download = false) => `/api/files/raw?${q({ project, path, download: download ? "1" : undefined })}`,
   writeFile: (project: string, path: string, content: string, mtime?: number, force?: boolean) =>
     req<FileEntry>("/api/files/write", json("PUT", { project, path, content, mtime, force })),

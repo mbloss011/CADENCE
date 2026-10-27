@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Brain, Cpu, Eye, FolderOpen, Globe, Lock, Pencil, Plus, Radar, RefreshCw, Save, Server, Shield, SlidersHorizontal, Trash2, Zap } from "lucide-react";
+import { Archive, ArchiveRestore, Brain, Cpu, Eye, FolderOpen, Globe, Lock, Pencil, Plus, Radar, RefreshCw, Save, Server, Shield, SlidersHorizontal, Trash2, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ProjectDialog, ProjectMark } from "../components/ProjectDialog";
 import { act, Busy, Dot, Field, PageHeader, Tabs, toast, Toggle } from "../components/ui";
@@ -320,16 +320,17 @@ function ProjectsTab() {
   return (
     <div className="space-y-3">
       <div className="flex items-center">
-        <p className="flex-1 text-[13px] text-muted">Each project is a folder. Chats, tasks, goals, ideas, canvas documents and the browser profile are kept separate per project.</p>
+        <p className="flex-1 text-[13px] text-muted">Each project is a folder. Chats, tasks, goals, ideas, canvas documents and the browser profile are kept separate per project. Archiving hides a project and stops the daemon working in it; nothing is deleted.</p>
         <button className="btn-primary" onClick={() => setDialog({ open: true })}><Plus size={14} /> New project</button>
       </div>
-      {store.projects.map((p) => (
-        <div key={p.id} className="card flex items-center gap-3 p-3.5">
+      {[...store.projects].sort((a, b) => Number(a.archived) - Number(b.archived)).map((p) => (
+        <div key={p.id} className={clsx("card flex items-center gap-3 p-3.5", p.archived && "opacity-60")}>
           <ProjectMark project={p} size={30} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-[14px] font-medium">{p.name}
               {p.default && <span className="chip border-line text-faint">launch folder</span>}
               {p.id === store.project && <span className="chip border-brand/40 text-brand">active</span>}
+              {p.archived && <span className="chip border-line text-faint">archived</span>}
               {!p.exists && <span className="chip border-bad/40 text-bad">folder missing</span>}
             </div>
             <div className="truncate font-mono text-[12px] text-muted">{p.path}</div>
@@ -339,6 +340,14 @@ function ProjectsTab() {
             <span>{p.counts.goals} goals</span><span>{p.counts.tasks} open tasks</span><span>{p.counts.ideas} ideas</span>
           </div>
           {p.id !== store.project && <button className="btn-outline px-2.5 py-1" onClick={() => store.setProject(p.id)}>Open</button>}
+          {!p.default && (
+            <button className="btn-ghost px-2" title={p.archived ? "Restore" : "Archive: hide it and stop background work"} onClick={async () => {
+              if (await act(() => api.editProject(p.id, { archived: !p.archived }), p.archived ? "Restored" : "Archived")) {
+                await store.refreshProjects();
+                if (!p.archived && p.id === store.project) store.setProject(store.projects.find((x) => x.default)?.id ?? "");
+              }
+            }}>{p.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}</button>
+          )}
           <button className="btn-ghost px-2" onClick={() => setDialog({ open: true, project: p })}><Pencil size={14} /></button>
         </div>
       ))}

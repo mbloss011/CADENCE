@@ -132,13 +132,25 @@ def builtin_tools(ws: Workspace, *, allow_shell: bool, output_limit: int, sandbo
     shell = sandbox or Sandbox(SandboxConfig(mode="none"), ws.root)
 
     async def read_file(args: dict[str, Any]) -> str:
+        from .documents import ExtractError, decode, extract, needs_extract
+
         path = ws.resolve(str(args.get("path", "")))
         if not path.is_file():
             raise ToolError(f"not a file: {ws.rel(path)}")
-        raw = path.read_bytes()
-        if b"\x00" in raw[:2048]:
-            raise ToolError("binary file; refusing to read")
-        lines = raw.decode("utf-8", "replace").splitlines()
+        with path.open("rb") as fh:
+            head = fh.read(8192)
+        structured = bool(args.get("structured")) or bool(args.get("pages")) or bool(args.get("sheet"))
+        if not needs_extract(path, head) and not structured:
+            lines = decode(path.read_bytes()).splitlines()
+        else:  # PDF, Office, spreadsheets, images, archives, … (or structured view of JSON/CSV/YAML)
+            try:
+                ex = await extract(path, pages=args.get("pages") or None, sheet=args.get("sheet") or None)
+            except ExtractError as exc:
+                raise ToolError(str(exc)) from None
+            header = f"[{ex.kind}: {ex.format}" + (f", {ex.pages} pages" if ex.pages else "") + "]"
+            if ex.warning:
+                header += f"\nNOTE: {ex.warning}"
+            lines = (header + "\n" + ex.text).splitlines()
         start = max(1, int(args.get("offset", 1) or 1))
         limit = int(args.get("limit", 400) or 400)
         chunk = lines[start - 1 : start - 1 + limit]
@@ -223,17 +235,25 @@ def builtin_tools(ws: Workspace, *, allow_shell: bool, output_limit: int, sandbo
         return f"[exit {res.exit}]\n{text}" if text.strip() else f"[exit {res.exit}] (no output)"
 
     async def view_image(args: dict[str, Any]) -> str:
+        from .documents import ExtractError, to_viewable
         from .vision import ImageError, describe
 
         path = ws.resolve(str(args.get("path", "")))
+        if not path.is_file():
+            raise ToolError(f"not a file: {ws.rel(path)}")
         try:
-            return truncate(await describe(vision, path, str(args.get("question", "") or "")), output_limit)
-        except ImageError as exc:
+            image = await to_viewable(path, max(1, int(args.get("page", 1) or 1)))
+            return truncate(await describe(vision, image, str(args.get("question", "") or "")), output_limit)
+        except (ImageError, ExtractError) as exc:
             raise ToolError(str(exc)) from None
 
     return [
-        Tool("read_file", "Read a text file with line numbers. Use offset/limit for large files.",
-             _schema({"path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}}, ["path"]),
+        Tool("read_file", "Read ANY file. Text and source code come back with line numbers (use offset/limit for large "
+             "files). PDF, Word (docx/doc/odt/rtf), PowerPoint, Excel/CSV/TSV, JSON/YAML, notebooks, epub, SQLite, archives, "
+             "media and images are converted to text and tables. pages='2-5' for PDFs; sheet='Name' for workbooks; "
+             "structured=true for an outline/column stats of JSON, YAML or CSV.",
+             _schema({"path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"},
+                      "pages": {"type": "string"}, "sheet": {"type": "string"}, "structured": {"type": "boolean"}}, ["path"]),
              read_file, read_only=True),
         Tool("write_file", "Create or overwrite a file with the given content.",
              _schema({"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]), write_file),
@@ -250,9 +270,11 @@ def builtin_tools(ws: Workspace, *, allow_shell: bool, output_limit: int, sandbo
                 + ("" if shell.cfg.network else ", no network") + "."),
              _schema({"command": {"type": "string"}, "timeout": {"type": "number"}}, ["command"]), bash),
     ] + ([
-        Tool("view_image", "Look at an image file in the workspace (screenshot, diagram, photo, UI) with the vision "
-             "model and get a detailed description. Ask a specific question for best results.",
-             _schema({"path": {"type": "string"}, "question": {"type": "string"}}, ["path"]), view_image, read_only=True),
+        Tool("view_image", "Look at a file with the vision model: any image format, or one page of a PDF, Word, "
+             "PowerPoint or spreadsheet document (page=N; use it for charts, layouts, scanned pages and anything text "
+             "extraction misses). Ask a specific question for best results.",
+             _schema({"path": {"type": "string"}, "question": {"type": "string"}, "page": {"type": "integer"}}, ["path"]),
+             view_image, read_only=True),
     ] if vision is not None else [])
 
 

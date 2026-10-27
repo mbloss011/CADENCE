@@ -118,17 +118,54 @@ async def test_tasks_and_memory_endpoints(cfg, make_router):
         await rt.close()
 
 
-async def test_upload_accepts_images_only(cfg, make_router):
+async def test_any_file_can_be_attached_and_is_read_into_the_message(cfg, make_router):
     import aiohttp
-    rt, client = await _client(cfg, make_router())
+    router = make_router(big_script=[Completion(content="Ada is 36")])
+    rt, client = await _client(cfg, router)
     try:
         fd = aiohttp.FormData()
         fd.add_field("file", b"\x89PNG\r\n", filename="shot.png", content_type="image/png")
-        up = await client.post("/api/upload", data=fd, headers=ORIGIN)
-        assert up.status == 200 and (await up.json())["id"].endswith(".png")
-        bad = aiohttp.FormData()
-        bad.add_field("file", b"#!/bin/sh", filename="x.sh", content_type="text/plain")
-        assert (await client.post("/api/upload", data=bad, headers=ORIGIN)).status == 400
+        img = await (await client.post("/api/upload", data=fd, headers=ORIGIN)).json()
+        assert img["kind"] == "image" and img["id"].endswith("-shot.png")
+        fd = aiohttp.FormData()
+        fd.add_field("file", b"name,age\nAda,36\n", filename="people.csv", content_type="text/csv")
+        doc = await (await client.post("/api/upload", data=fd, headers=ORIGIN)).json()
+        assert doc["kind"] == "file" and doc["name"] == "people.csv"
+        sid = (await (await client.post("/api/sessions", headers=ORIGIN)).json())["id"]
+        ws = await client.ws_connect("/api/ws", headers=ORIGIN)
+        await ws.send_json({"op": "send", "session": sid, "text": "how old is Ada?", "files": [doc["id"]]})
+        await _until_finished(ws, sid)
+        sent = router.big.calls[0][-1]["content"]
+        assert "how old is Ada?" in sent and "### people.csv (table) — saved as .kestrel/attachments/people.csv" in sent
+        assert "| Ada | 36 |" in sent
+        assert (cfg.workspace / ".kestrel/attachments/people.csv").read_text().startswith("name,age")
+        item = (await (await client.get(f"/api/sessions/{sid}")).json())["items"][0]
+        assert item["text"] == "how old is Ada?" and item["files"] == [
+            {"name": "people.csv", "kind": "table", "path": ".kestrel/attachments/people.csv"}]
+        prev = await (await client.get("/api/files/preview?path=.kestrel/attachments/people.csv")).json()
+        assert prev["tables"][0]["columns"] == ["name", "age"]
+        await ws.close()
+    finally:
+        await client.close()
+        await rt.close()
+
+
+async def test_projects_can_be_archived(cfg, make_router, tmp_path):
+    other = tmp_path / "old"
+    other.mkdir()
+    rt, client = await _client(cfg, make_router())
+    try:
+        p = await (await client.post("/api/projects", json={"path": str(other), "name": "Old"}, headers=ORIGIN)).json()
+        assert (await client.patch(f"/api/projects/{rt.default_project.id}", json={"archived": True}, headers=ORIGIN)).status == 409
+        a = await (await client.patch(f"/api/projects/{p['id']}", json={"archived": True}, headers=ORIGIN)).json()
+        assert a["archived"] is True and rt.projects.get(p["id"]).archived
+        from kestrel.tasks import Task
+        rt.tasks.add(Task(title="dormant", project=p["id"]))
+        rt.make_daemon()
+        rt.daemon._launch_ready()
+        assert rt.daemon.running == []  # the daemon leaves archived projects alone
+        b = await (await client.patch(f"/api/projects/{p['id']}", json={"archived": False}, headers=ORIGIN)).json()
+        assert b["archived"] is False
     finally:
         await client.close()
         await rt.close()

@@ -7,7 +7,7 @@ import { Composer } from "../components/Composer";
 import { MessageItem } from "../components/Messages";
 import { ContextMeter, Dot, Spinner } from "../components/ui";
 import type { Status } from "../lib/api";
-import { useStore, type DockTab } from "../lib/store";
+import { useStore, type Attachment, type DockTab } from "../lib/store";
 
 const STARTERS = [
   { icon: Wrench, text: "Run the test suite and fix anything that fails" },
@@ -76,7 +76,7 @@ export function ChatView({ sid, status, onNew }: { sid: string | null; status: S
   };
 
   const send = useCallback(
-    (text: string, uploads: { id: string; preview: string }[]) => {
+    (text: string, uploads: Attachment[]) => {
       if (!sid) return;
       setPinned(true);
       store.send(sid, text, uploads);

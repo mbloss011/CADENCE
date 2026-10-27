@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { AlertTriangle, Brain, ChevronRight, CornerDownRight, Info, OctagonX } from "lucide-react";
+import { AlertTriangle, Brain, ChevronRight, CornerDownRight, Info, OctagonX, Paperclip } from "lucide-react";
 import { memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -56,6 +56,17 @@ export function MessageItem({ item }: { item: Item }) {
                   <a key={i} href={src} target="_blank" rel="noreferrer">
                     <img src={src} alt="attachment" className="h-28 rounded-lg border border-line object-cover" />
                   </a>
+                ))}
+              </div>
+            )}
+            {item.files && item.files.length > 0 && (
+              <div className="flex flex-wrap justify-end gap-1.5">
+                {item.files.map((f, i) => (
+                  <span key={i} className="flex items-center gap-1.5 rounded-lg border border-line bg-panel px-2.5 py-1.5 text-[12.5px]" title={f.path}>
+                    <Paperclip size={13} className="text-brand" />
+                    <span className="max-w-[16rem] truncate">{f.name}</span>
+                    {f.kind !== "file" && <span className="text-[11px] text-faint">{f.kind}</span>}
+                  </span>
                 ))}
               </div>
             )}

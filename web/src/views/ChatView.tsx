@@ -228,7 +228,7 @@ function Row({ k, v, ok, warn }: { k: string; v: string; ok?: boolean; warn?: bo
 function Welcome({ status, onPick }: { status: Status | null; onPick: (t: string) => void }) {
   return (
     <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center px-6 py-12">
-      <Logo className="mb-3 h-28 w-28" />
+      <Logo className="mb-3 h-[140px] w-[140px]" />
       <div className="wordmark mb-4 text-3xl font-bold tracking-tight">Cadence</div>
       <h2 className="text-xl font-semibold tracking-tight">What should we build?</h2>
       <p className="mt-2 text-center text-sm text-muted">

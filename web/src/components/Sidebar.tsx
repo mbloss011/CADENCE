@@ -39,8 +39,8 @@ export function Sidebar({
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r border-line bg-panel/60">
       <div className="flex h-14 items-center gap-2.5 px-4">
-        <Logo className="h-8 w-9" />
-        <div className="wordmark flex-1 text-[16px] font-bold tracking-tight">Cadence</div>
+        <Logo className="-ml-1 h-11 w-12" />
+        <div className="wordmark flex-1 text-[18px] font-bold tracking-tight">Cadence</div>
         <span title={store.connected ? "connected" : "reconnecting…"}>
           <Dot tone={store.connected ? "ok" : "bad"} />
         </span>
